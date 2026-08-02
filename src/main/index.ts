@@ -115,7 +115,7 @@ log.errorHandler.startCatching({
       `${error.stack}`;
 
     if (!app.isReady()) {
-      dialog.showErrorBox(`YouTube Music Desktop App Crashed`, `Application crashed before ready\n\n${dialogMessage}`);
+      dialog.showErrorBox(`YTMDesktop Adblock Crashed`, `Application crashed before ready\n\n${dialogMessage}`);
     } else {
       const options = ["Copy to Clipboard and Exit", "Exit"];
       if (!app.isPackaged) {
@@ -124,7 +124,7 @@ log.errorHandler.startCatching({
 
       result = dialog.showMessageBoxSync({
         title: "Error",
-        message: "YouTube Music Desktop App Crashed",
+        message: "YTMDesktop Adblock Crashed",
         detail: dialogMessage,
         type: "error",
         buttons: options
@@ -132,7 +132,7 @@ log.errorHandler.startCatching({
 
       // Copy to Clipboard
       if (result === 0 || result === 2) {
-        clipboard.writeText(`YouTube Music Desktop App Crashed\n\n${dialogMessage}`);
+        clipboard.writeText(`YTMDesktop Adblock Crashed\n\n${dialogMessage}`);
       }
     }
 
@@ -159,7 +159,7 @@ log.info("Application launched");
 app.enableSandbox();
 
 // appMenu allows for some basic windows management, editMenu allow for copy and paste shortcuts on MacOS
-const template: MenuItemConstructorOptions[] = [{ role: "appMenu", label: "YouTube Music Desktop App" }, { role: "editMenu" }];
+const template: MenuItemConstructorOptions[] = [{ role: "appMenu", label: "YTMDesktop Adblock" }, { role: "editMenu" }];
 const builtMenu = isDarwin ? Menu.buildFromTemplate(template) : null; // null for performance https://www.electronjs.org/docs/latest/tutorial/performance#8-call-menusetapplicationmenunull-when-you-do-not-need-a-default-menu
 Menu.setApplicationMenu(builtMenu);
 
@@ -1135,7 +1135,7 @@ const createYTMView = (): void => {
   });
   ytmView.webContents.on("page-title-updated", (_event, title) => {
     if (mainWindow) {
-      mainWindow.setTitle(`${title} | YouTube Music Desktop App`);
+      mainWindow.setTitle(`${title} | YTMDesktop Adblock`);
     }
   });
   ytmView.webContents.on("context-menu", (_event, params) => {

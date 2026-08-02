@@ -13,7 +13,7 @@ if (location.protocol === "chrome-extension:") {
   const chromeApi = globalScope.chrome;
 
   if (chromeApi) {
-    const noop = () => undefined;
+    const noop = (): undefined => undefined;
     const asyncNoop = (...args: unknown[]) => {
       const callback = args[args.length - 1];
       if (typeof callback === "function") callback();
@@ -144,7 +144,7 @@ if (location.protocol === "chrome-extension:") {
     }
 
     if (!chromeApi.windows) {
-      const windowStub = { id: -1, focused: true, type: "normal", tabs: [] };
+      const windowStub = { id: -1, focused: true, type: "normal", tabs: [] as unknown[] };
       chromeApi.windows = {
         WINDOW_ID_NONE: -1,
         WINDOW_ID_CURRENT: -2,
