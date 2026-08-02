@@ -1,6 +1,8 @@
 # YouTube Music Desktop App
 ### Now with a Fresh new Codebase 😉
 
+> **This is a fork of [ytmdesktop/ytmdesktop](https://github.com/ytmdesktop/ytmdesktop)** with ad blocking added. See [Ad blocking](#ad-blocking) below.
+
 ![YouTube Music Desktop App](.github/images/readme_main_app.png)
 
 [![Discord][discord-img]][discord-url]
@@ -41,6 +43,43 @@ TODO: Write guides for v2. While these may still be helpful they are geared towa
 #### Mac
 - Brew: ```brew install --cask ytmdesktop-youtube-music``` (Community Maintained)
 - Binaries: <https://github.com/ytmdesktop/ytmdesktop/releases>
+
+# Ad blocking
+
+Everything lives under **Settings → Adblock** and works in two independent ways.
+
+## Built-in blocker
+
+Powered by [@ghostery/adblocker](https://github.com/ghostery/adblocker) with EasyList and uBlock
+Origin's filter lists. It is on by default and has three parts:
+
+- **Filter lists** — ads only, ads and trackers (default), or also annoyances. The compiled engine is
+  cached under `<userData>/adblocker` and refreshed every three days; when the lists can't be fetched
+  the cached engine is used, so the app still blocks while offline.
+- **Cosmetic filtering** — hides ad placeholders left behind in the page.
+- **Scriptlet injection** — this is the one that stops the ads YouTube Music plays *between songs*.
+  Those come from the same domain as the music itself, so no amount of network filtering catches
+  them; only the filter lists' scriptlets do. They're injected into the page's main world at document
+  start, before YouTube Music's own scripts run — injecting them any later makes them fight the
+  player proxy this app installs and the view dies with `Maximum call stack size exceeded`. Turn this
+  off if playback ever starts misbehaving.
+
+## Browser extensions
+
+Unpacked Chrome extensions can be loaded into the YouTube Music view. Point the setting at an
+extension folder (the one containing `manifest.json`) and it is loaded on every launch.
+
+Electron only implements a subset of the Chrome extension APIs, so a few things are worth knowing:
+
+- **Packed `.crx` files are not supported** — extensions have to be unpacked directories.
+- **Manifest V2 blockers work**, because Electron implements `chrome.webRequest`. uBlock Origin
+  (the `uBlock0_*.chromium.zip` release from [gorhill/uBlock](https://github.com/gorhill/uBlock/releases))
+  is the tested case.
+- **Manifest V3 blockers do not.** Electron has no `chrome.declarativeNetRequest`, so uBlock Origin
+  Lite and friends load without ever blocking anything.
+- Extension UI (toolbar popups, badges, context menus) doesn't exist here. `src/renderer/extensions/shim-preload.ts`
+  stubs out the missing APIs so extensions get through startup instead of throwing — without it
+  uBlock Origin's background page dies on `browserAction` and never registers its request listeners.
 
 # Developing
 To clone and run this repository you'll need [Git](https://git-scm.com) and [Node.js (v20)](https://nodejs.org/en/download/) (which comes with [npm](http://npmjs.com)) installed on your computer. From your command line:

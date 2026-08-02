@@ -26,11 +26,13 @@ import electronSquirrelStartup from "electron-squirrel-startup";
 
 import MemoryStore from "./memory-store";
 import playerStateStore, { PlayerState, VideoState } from "./player-state-store";
-import { MemoryStoreSchema, StoreSchema, TrayIconStyle } from "../shared/store/schema";
+import { AdblockerFilterSet, MemoryStoreSchema, StoreSchema, TrayIconStyle } from "../shared/store/schema";
 
+import Adblocker from "./integrations/adblocker";
 import CompanionServer from "./integrations/companion-server";
 import CustomCSS from "./integrations/custom-css";
 import DiscordPresence from "./integrations/discord-presence";
+import Extensions, { ExtensionValidationError } from "./integrations/extensions";
 import LastFM from "./integrations/last-fm";
 import NowPlayingNotifications from "./integrations/notifications";
 import VolumeRatio from "./integrations/volume-ratio";
@@ -161,12 +163,16 @@ const template: MenuItemConstructorOptions[] = [{ role: "appMenu", label: "YouTu
 const builtMenu = isDarwin ? Menu.buildFromTemplate(template) : null; // null for performance https://www.electronjs.org/docs/latest/tutorial/performance#8-call-menusetapplicationmenunull-when-you-do-not-need-a-default-menu
 Menu.setApplicationMenu(builtMenu);
 
+const adblocker = new Adblocker();
 const companionServer = new CompanionServer();
 const customCss = new CustomCSS();
 const discordPresence = new DiscordPresence();
+const extensions = new Extensions();
 const lastFMScrobbler = new LastFM();
 const nowPlayingNotifications = new NowPlayingNotifications();
 const ratioVolume = new VolumeRatio();
+
+const ytmViewPartition = app.isPackaged ? "persist:ytmview" : "persist:ytmview-dev";
 
 const ytmViewIntegrationScripts: { [name: string]: { [name: string]: string } } = {};
 
@@ -370,6 +376,14 @@ const store = new Conf<StoreSchema>({
       discordPresenceEnabled: false,
       lastFMEnabled: false
     },
+    adblocker: {
+      blockerEnabled: true,
+      filterSet: AdblockerFilterSet.AdsAndTracking,
+      cosmeticFilteringEnabled: true,
+      scriptletsEnabled: true,
+      extensionsEnabled: false,
+      extensions: []
+    },
     shortcuts: {
       playPause: "",
       next: "",
@@ -548,6 +562,36 @@ store.onDidAnyChange(async (newState, oldState) => {
     log.info("Integration disabled: Last.fm");
   }
 
+  // Adblocker
+  if (
+    newState.adblocker.blockerEnabled !== oldState.adblocker.blockerEnabled ||
+    newState.adblocker.filterSet !== oldState.adblocker.filterSet ||
+    newState.adblocker.cosmeticFilteringEnabled !== oldState.adblocker.cosmeticFilteringEnabled ||
+    newState.adblocker.scriptletsEnabled !== oldState.adblocker.scriptletsEnabled
+  ) {
+    if (newState.adblocker.blockerEnabled) {
+      await adblocker.initialize();
+      log.info("Integration enabled: Adblocker");
+    } else {
+      adblocker.disable();
+      log.info("Integration disabled: Adblocker");
+    }
+
+    reloadYTMView();
+  }
+
+  if (newState.adblocker.extensionsEnabled !== oldState.adblocker.extensionsEnabled) {
+    if (newState.adblocker.extensionsEnabled) {
+      await extensions.loadAll();
+      log.info("Integration enabled: Extensions");
+    } else {
+      extensions.disable();
+      log.info("Integration disabled: Extensions");
+    }
+
+    reloadYTMView();
+  }
+
   if (anyShortcutChanged(newState, oldState)) registerShortcuts();
 });
 log.info("Created electron store");
@@ -564,6 +608,14 @@ function saveState() {
   store.set("state.lastUrl", lastUrl);
   store.set("state.lastVideoId", lastVideoId);
   store.set("state.lastPlaylistId", lastPlaylistId);
+}
+
+// Blocking rules, cosmetic filters and extension content scripts only apply from the next
+// navigation onwards, so the view needs a reload whenever any of them change
+function reloadYTMView() {
+  if (ytmView) {
+    ytmView.webContents.reload();
+  }
 }
 
 // Automatic background state saving every 5 minutes
@@ -1025,7 +1077,7 @@ const createYTMView = (): void => {
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
-      partition: app.isPackaged ? "persist:ytmview" : "persist:ytmview-dev",
+      partition: ytmViewPartition,
       preload: path.join(__dirname, `../renderer/windows/ytmview/preload.js`),
       autoplayPolicy: store.get("playback.continueWhereYouLeftOffPaused") ? "document-user-activation-required" : "no-user-gesture-required"
     }
@@ -1720,6 +1772,35 @@ app.on("ready", async () => {
     store.reset(key);
   });
 
+  // Handle extension ipc
+  ipcMain.handle("extensions:add", async event => {
+    if (event.sender !== settingsWindow.webContents) return { cancelled: true };
+
+    const result = await dialog.showOpenDialog(settingsWindow, {
+      title: "Select an unpacked extension folder",
+      properties: ["openDirectory"]
+    });
+    if (result.canceled || result.filePaths.length === 0) return { cancelled: true };
+
+    try {
+      const extension = await extensions.add(result.filePaths[0]);
+      reloadYTMView();
+      return { extension };
+    } catch (error) {
+      if (error instanceof ExtensionValidationError) return { error: error.message };
+
+      log.error("Failed to add extension", error);
+      return { error: "The extension could not be added" };
+    }
+  });
+
+  ipcMain.handle("extensions:remove", (event, extensionPath: string) => {
+    if (event.sender !== settingsWindow.webContents) return;
+
+    extensions.remove(extensionPath);
+    reloadYTMView();
+  });
+
   // Handle safeStorage ipc
   ipcMain.handle("safeStorage:decryptString", (event, value: string) => {
     if (!memoryStore.get("safeStorageAvailable")) throw new Error("safeStorage is unavailable");
@@ -1778,7 +1859,7 @@ app.on("ready", async () => {
   log.info("Setup IPC handlers");
 
   // Create the permission handlers
-  session.fromPartition(app.isPackaged ? "persist:ytmview" : "persist:ytmview-dev").setPermissionCheckHandler((webContents, permission) => {
+  session.fromPartition(ytmViewPartition).setPermissionCheckHandler((webContents, permission) => {
     if (webContents == ytmView.webContents) {
       if (permission === "fullscreen") {
         return true;
@@ -1787,7 +1868,7 @@ app.on("ready", async () => {
 
     return false;
   });
-  session.fromPartition(app.isPackaged ? "persist:ytmview" : "persist:ytmview-dev").setPermissionRequestHandler((webContents, permission, callback) => {
+  session.fromPartition(ytmViewPartition).setPermissionRequestHandler((webContents, permission, callback) => {
     if (webContents == ytmView.webContents) {
       if (permission === "fullscreen") {
         return callback(true);
@@ -1895,6 +1976,24 @@ app.on("ready", async () => {
     map[obj.name] = obj.script;
     return map;
   }, {});
+
+  // Content blocking has to be attached to the session before the view starts loading, otherwise
+  // the first navigation goes through unfiltered
+  const ytmViewSession = session.fromPartition(ytmViewPartition);
+
+  adblocker.provide(store, memoryStore, ytmViewSession);
+  if (store.get("adblocker").blockerEnabled) {
+    memoryStore.set("ytmViewLoadingStatus", "Loading filter lists...");
+    await adblocker.initialize();
+    log.info("Integration enabled: Adblocker");
+  }
+
+  extensions.provide(store, memoryStore, ytmViewSession);
+  if (store.get("adblocker").extensionsEnabled) {
+    memoryStore.set("ytmViewLoadingStatus", "Loading extensions...");
+    await extensions.loadAll();
+    log.info("Integration enabled: Extensions");
+  }
 
   // Create the YouTube Music view
   createYTMView();

@@ -4,6 +4,32 @@ export enum TrayIconStyle {
   Black = 2
 }
 
+export enum AdblockerFilterSet {
+  AdsOnly = 0,
+  AdsAndTracking = 1,
+  Full = 2
+}
+
+// An unpacked Chrome extension the user pointed the application at
+export type UserExtension = {
+  path: string;
+  name: string;
+  version: string | null;
+};
+
+// An extension which is currently loaded into the YTM view session
+export type LoadedExtension = {
+  id: string;
+  name: string;
+  version: string;
+  path: string;
+};
+
+export type ExtensionLoadError = {
+  path: string;
+  message: string;
+};
+
 export type StoreSchema = {
   metadata: {
     version: 1;
@@ -35,6 +61,14 @@ export type StoreSchema = {
     companionServerCORSWildcardEnabled: boolean;
     discordPresenceEnabled: boolean;
     lastFMEnabled: boolean;
+  };
+  adblocker: {
+    blockerEnabled: boolean;
+    filterSet: AdblockerFilterSet;
+    cosmeticFilteringEnabled: boolean;
+    scriptletsEnabled: boolean;
+    extensionsEnabled: boolean;
+    extensions: UserExtension[];
   };
   shortcuts: {
     playPause: string;
@@ -83,4 +117,9 @@ export type MemoryStoreSchema = {
   ytmViewUnresponsive: boolean;
   appUpdateAvailable: boolean;
   appUpdateDownloaded: boolean;
+  adblockerReady: boolean;
+  adblockerFailed: boolean;
+  adblockerBlockedCount: number;
+  extensionsLoaded: LoadedExtension[];
+  extensionsLoadErrors: ExtensionLoadError[];
 };

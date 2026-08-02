@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { defineConfig } from "vite";
+import { defineConfig, Plugin } from "vite";
 
 let gitBranch: string = "";
 try {
@@ -21,6 +21,29 @@ try {
 // HEAD is used for production builds as they check out version tags in a detached HEAD state
 const devBuild = gitBranch !== "HEAD" && process.env.NODE_ENV === "development";
 
+// @ghostery/adblocker-electron resolves the path to its own preload script out of node_modules at
+// import time, which throws once the bundle lives inside an asar. We bundle and register that
+// preload ourselves (see src/main/integrations/adblocker), so the module is stubbed out here.
+const ghosteryPreloadPathId = "\0ytmd:ghostery-preload-path";
+const stubGhosteryPreloadPath: Plugin = {
+  name: "ytmd-stub-ghostery-preload-path",
+  enforce: "pre",
+  resolveId(source, importer) {
+    if (source === "./preload_path.js" && importer && importer.includes("adblocker-electron")) {
+      return ghosteryPreloadPathId;
+    }
+
+    return null;
+  },
+  load(id) {
+    if (id === ghosteryPreloadPathId) {
+      return "export const PRELOAD_PATH = undefined;";
+    }
+
+    return null;
+  }
+};
+
 // https://vitejs.dev/config
 export default defineConfig({
   build: {
@@ -29,6 +52,7 @@ export default defineConfig({
       external: ["bufferutil", "utf-8-validate"]
     }
   },
+  plugins: [stubGhosteryPreloadPath],
   define: {
     YTMD_DISABLE_UPDATES: devBuild,
     YTMD_UPDATE_FEED_OWNER: process.env.YTMD_UPDATE_FEED_OWNER ? `'${process.env.YTMD_UPDATE_FEED_OWNER}'` : "'ytmdesktop'",

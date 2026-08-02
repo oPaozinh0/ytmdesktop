@@ -1,6 +1,6 @@
 import { WindowsEventArguments } from "~shared/types";
 import Store from "../store-ipc/store";
-import { StoreSchema, MemoryStoreSchema } from "~shared/store/schema";
+import { StoreSchema, MemoryStoreSchema, UserExtension } from "~shared/store/schema";
 import MemoryStore from "../store-ipc/memory-store";
 
 declare global {
@@ -15,6 +15,10 @@ declare global {
       safeStorage: {
         decryptString(value: string): string;
         encryptString(value: string): Buffer;
+      };
+      extensions: {
+        add(): Promise<{ extension?: UserExtension; error?: string; cancelled?: boolean }>;
+        remove(extensionPath: string): Promise<void>;
       };
       openSettingsWindow(): void;
       restartApplication(): void;

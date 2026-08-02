@@ -103,6 +103,16 @@ const config: ForgeConfig = {
           entry: "src/renderer/ytmview/preload.ts",
           config: "viteconfig/preload/ytmview.ts",
           target: "preload"
+        },
+        {
+          entry: "src/renderer/ytmview/adblocker-preload.ts",
+          config: "viteconfig/preload/ytmview_adblocker.ts",
+          target: "preload"
+        },
+        {
+          entry: "src/renderer/extensions/shim-preload.ts",
+          config: "viteconfig/preload/extension_shim.ts",
+          target: "preload"
         }
       ],
       renderer: [

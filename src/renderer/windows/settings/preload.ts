@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld("ytmd", {
     decryptString: async (value: string) => await ipcRenderer.invoke("safeStorage:decryptString", value),
     encryptString: async (value: string) => await ipcRenderer.invoke("safeStorage:encryptString", value)
   },
+  extensions: {
+    add: async () => await ipcRenderer.invoke("extensions:add"),
+    remove: async (extensionPath: string) => await ipcRenderer.invoke("extensions:remove", extensionPath)
+  },
   restartApplication: () => ipcRenderer.send("settingsWindow:restartapplication"),
   restartApplicationForUpdate: () => ipcRenderer.send("app:restartApplicationForUpdate"),
   minimizeWindow: () => ipcRenderer.send("settingsWindow:minimize"),

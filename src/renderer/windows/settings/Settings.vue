@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import KeybindInput from "../../components/KeybindInput.vue";
 import YTMDSetting from "../../components/YTMDSetting.vue";
-import { StoreSchema, TrayIconStyle } from "~shared/store/schema";
+import { AdblockerFilterSet, ExtensionLoadError, LoadedExtension, StoreSchema, TrayIconStyle, UserExtension } from "~shared/store/schema";
 import { AuthToken } from "~shared/integrations/companion-server/types";
 import logo from "~assets/icons/ytmd.png";
 
@@ -33,6 +33,7 @@ const general: StoreSchema["general"] = await store.get("general");
 const appearance: StoreSchema["appearance"] = await store.get("appearance");
 const playback: StoreSchema["playback"] = await store.get("playback");
 const integrations: StoreSchema["integrations"] = await store.get("integrations");
+const adblocker: StoreSchema["adblocker"] = await store.get("adblocker");
 const shortcuts: StoreSchema["shortcuts"] = await store.get("shortcuts");
 const lastFM: StoreSchema["lastfm"] = await store.get("lastfm");
 
@@ -61,6 +62,14 @@ const companionServerAuthTokens = ref<AuthToken[]>(
 const companionServerCORSWildcardEnabled = ref<boolean>(integrations.companionServerCORSWildcardEnabled);
 const discordPresenceEnabled = ref<boolean>(integrations.discordPresenceEnabled);
 const lastFMEnabled = ref<boolean>(integrations.lastFMEnabled);
+
+const adblockerEnabled = ref<boolean>(adblocker.blockerEnabled);
+const adblockerFilterSet = ref<number>(adblocker.filterSet);
+const adblockerCosmeticFilteringEnabled = ref<boolean>(adblocker.cosmeticFilteringEnabled);
+const adblockerScriptletsEnabled = ref<boolean>(adblocker.scriptletsEnabled);
+const extensionsEnabled = ref<boolean>(adblocker.extensionsEnabled);
+const userExtensions = ref<UserExtension[]>(adblocker.extensions ?? []);
+const extensionAddError = ref<string | null>(null);
 
 const shortcutPlayPause = ref<string>(shortcuts.playPause);
 const shortcutNext = ref<string>(shortcuts.next);
@@ -102,6 +111,13 @@ store.onDidAnyChange(async newState => {
   lastFMSessionKey.value = newState.lastfm.sessionKey;
   scrobblePercent.value = newState.lastfm.scrobblePercent;
 
+  adblockerEnabled.value = newState.adblocker.blockerEnabled;
+  adblockerFilterSet.value = newState.adblocker.filterSet;
+  adblockerCosmeticFilteringEnabled.value = newState.adblocker.cosmeticFilteringEnabled;
+  adblockerScriptletsEnabled.value = newState.adblocker.scriptletsEnabled;
+  extensionsEnabled.value = newState.adblocker.extensionsEnabled;
+  userExtensions.value = newState.adblocker.extensions ?? [];
+
   shortcutPlayPause.value = newState.shortcuts.playPause;
   shortcutNext.value = newState.shortcuts.next;
   shortcutPrevious.value = newState.shortcuts.previous;
@@ -125,6 +141,12 @@ const companionServerAuthWindowEnabled = ref<boolean>(await memoryStore.get("com
 
 const autoUpdaterDisabled = ref<boolean>(await memoryStore.get("autoUpdaterDisabled"));
 
+const adblockerReady = ref<boolean>(await memoryStore.get("adblockerReady"));
+const adblockerFailed = ref<boolean>(await memoryStore.get("adblockerFailed"));
+const adblockerBlockedCount = ref<number>((await memoryStore.get("adblockerBlockedCount")) ?? 0);
+const extensionsLoaded = ref<LoadedExtension[]>((await memoryStore.get("extensionsLoaded")) ?? []);
+const extensionsLoadErrors = ref<ExtensionLoadError[]>((await memoryStore.get("extensionsLoadErrors")) ?? []);
+
 memoryStore.onStateChanged(newState => {
   discordPresenceConnectionFailed.value = newState.discordPresenceConnectionFailed;
 
@@ -141,6 +163,12 @@ memoryStore.onStateChanged(newState => {
   safeStorageAvailable.value = newState.safeStorageAvailable;
 
   autoUpdaterDisabled.value = newState.autoUpdaterDisabled;
+
+  adblockerReady.value = newState.adblockerReady;
+  adblockerFailed.value = newState.adblockerFailed;
+  adblockerBlockedCount.value = newState.adblockerBlockedCount ?? 0;
+  extensionsLoaded.value = newState.extensionsLoaded ?? [];
+  extensionsLoadErrors.value = newState.extensionsLoadErrors ?? [];
 });
 
 async function memorySettingsChanged() {
@@ -170,6 +198,12 @@ async function settingsChanged() {
   store.set("integrations.discordPresenceEnabled", discordPresenceEnabled.value);
   store.set("integrations.lastFMEnabled", lastFMEnabled.value);
   store.set("lastfm.scrobblePercent", scrobblePercent.value);
+
+  store.set("adblocker.blockerEnabled", adblockerEnabled.value);
+  store.set("adblocker.filterSet", adblockerFilterSet.value);
+  store.set("adblocker.cosmeticFilteringEnabled", adblockerCosmeticFilteringEnabled.value);
+  store.set("adblocker.scriptletsEnabled", adblockerScriptletsEnabled.value);
+  store.set("adblocker.extensionsEnabled", extensionsEnabled.value);
 
   store.set("shortcuts.playPause", shortcutPlayPause.value);
   store.set("shortcuts.next", shortcutNext.value);
@@ -217,6 +251,34 @@ async function deleteCompanionAuthToken(appId: string) {
 
 function removeCustomCSSPath() {
   store.set("appearance.customCSSPath", null);
+}
+
+async function addExtension() {
+  extensionAddError.value = null;
+
+  const result = await window.ytmd.extensions.add();
+  if (result.error) {
+    extensionAddError.value = result.error;
+  }
+}
+
+async function removeExtension(extensionPath: string) {
+  extensionAddError.value = null;
+  await window.ytmd.extensions.remove(extensionPath);
+}
+
+function extensionStatus(extension: UserExtension) {
+  const error = extensionsLoadErrors.value.find(loadError => loadError.path === extension.path);
+  if (error) return error.message;
+
+  const loaded = extensionsLoaded.value.find(loadedExtension => loadedExtension.path === extension.path);
+  if (loaded) return `Loaded${loaded.version ? ` • ${loaded.version}` : ""}`;
+
+  return extensionsEnabled.value ? "Not loaded" : "Extensions are disabled";
+}
+
+function extensionHasError(extension: UserExtension) {
+  return extensionsLoadErrors.value.some(loadError => loadError.path === extension.path);
 }
 
 function changeTab(newTab: number) {
@@ -275,6 +337,7 @@ window.ytmd.handleUpdateDownloaded(() => {
         <li :class="{ active: currentTab === 2 }" @click="changeTab(2)"><span class="material-symbols-outlined">brush</span>Appearance</li>
         <li :class="{ active: currentTab === 3 }" @click="changeTab(3)"><span class="material-symbols-outlined">music_note</span>Playback</li>
         <li :class="{ active: currentTab === 4 }" @click="changeTab(4)"><span class="material-symbols-outlined">wifi_tethering</span>Integrations</li>
+        <li :class="{ active: currentTab === 6 }" @click="changeTab(6)"><span class="material-symbols-outlined">shield</span>Adblock</li>
         <li :class="{ active: currentTab === 5 }" @click="changeTab(5)"><span class="material-symbols-outlined">keyboard</span>Shortcuts</li>
         <span class="push"></span>
         <li :class="{ active: currentTab === 99 }" @click="changeTab(99)"><span class="material-symbols-outlined">info</span>About</li>
@@ -437,6 +500,94 @@ window.ytmd.handleUpdateDownloaded(() => {
             step="5"
             @change="settingsChanged"
           />
+        </div>
+
+        <div v-if="currentTab === 6" class="adblock-tab">
+          <YTMDSetting
+            v-model="adblockerEnabled"
+            type="checkbox"
+            name="Built-in ad blocker"
+            description="Blocks ads and trackers using EasyList and uBlock Origin filter lists"
+            @change="settingsChanged"
+          />
+          <YTMDSetting
+            v-if="adblockerEnabled"
+            v-model="adblockerFilterSet"
+            :options-map="{
+              [AdblockerFilterSet.AdsOnly]: 'Ads only',
+              [AdblockerFilterSet.AdsAndTracking]: 'Ads and trackers',
+              [AdblockerFilterSet.Full]: 'Ads, trackers and annoyances'
+            }"
+            type="select"
+            indented
+            name="Filter lists"
+            @change="settingsChanged"
+          />
+          <YTMDSetting
+            v-if="adblockerEnabled"
+            v-model="adblockerCosmeticFilteringEnabled"
+            type="checkbox"
+            indented
+            name="Cosmetic filtering"
+            description="Also hides ad placeholders left behind in the page"
+            @change="settingsChanged"
+          />
+          <YTMDSetting
+            v-if="adblockerEnabled && adblockerCosmeticFilteringEnabled"
+            v-model="adblockerScriptletsEnabled"
+            type="checkbox"
+            indented
+            name="Scriptlet injection"
+            description="Runs the filter lists' anti-ad scripts. This is what stops the ads YouTube Music plays between songs, since those are served from the same domain as the music. Turn it off if playback starts misbehaving."
+            @change="settingsChanged"
+          />
+          <div v-if="adblockerEnabled" class="setting indented">
+            <p v-if="adblockerFailed" class="adblock-status error">Filter lists could not be loaded. Check your connection and restart the app.</p>
+            <p v-else-if="adblockerReady" class="adblock-status">{{ adblockerBlockedCount }} requests blocked this session</p>
+            <p v-else class="adblock-status">Loading filter lists...</p>
+          </div>
+
+          <YTMDSetting
+            v-model="extensionsEnabled"
+            type="checkbox"
+            name="Browser extensions"
+            description="Loads unpacked Chrome extensions such as uBlock Origin into YouTube Music"
+            @change="settingsChanged"
+          />
+          <YTMDSetting
+            v-if="extensionsEnabled"
+            type="custom"
+            flex-column
+            indented
+            name="Installed extensions"
+            description="Electron only implements part of the Chrome extension APIs. Manifest V2 blockers work, Manifest V3 blockers relying on declarativeNetRequest (such as uBlock Origin Lite) will not block anything."
+          >
+            <table class="extensions-table">
+              <thead>
+                <tr>
+                  <th class="extension">Extension</th>
+                  <th class="controls"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="extension in userExtensions" :key="extension.path">
+                  <td class="extension">
+                    <span class="name">{{ extension.name }}</span
+                    ><br />
+                    <span :class="{ status: true, error: extensionHasError(extension) }">{{ extensionStatus(extension) }}</span
+                    ><br />
+                    <span class="path">{{ extension.path }}</span>
+                  </td>
+                  <td class="controls">
+                    <button @click="removeExtension(extension.path)"><span class="material-symbols-outlined">delete</span></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="userExtensions.length === 0" class="no-extensions">No extensions added</div>
+            <p v-if="extensionAddError" class="extension-add-error">{{ extensionAddError }}</p>
+            <button class="add-extension-button" @click="addExtension"><span class="material-symbols-outlined">create_new_folder</span>Add extension</button>
+          </YTMDSetting>
         </div>
 
         <div v-if="currentTab === 5" class="shortcuts-tab">
@@ -844,6 +995,85 @@ window.ytmd.handleUpdateDownloaded(() => {
 .discord-failure {
   margin: 0;
   color: #969696;
+}
+
+.adblock-status {
+  margin: 0;
+  color: #969696;
+}
+
+.adblock-status.error {
+  color: #f44336;
+}
+
+.extensions-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.extensions-table tr .extension {
+  width: 100%;
+  word-wrap: break-word;
+}
+
+.extensions-table tr .extension .status {
+  color: #969696;
+  font-size: 14px;
+}
+
+.extensions-table tr .extension .status.error {
+  color: #f44336;
+}
+
+.extensions-table tr .extension .path {
+  color: #6e6e6e;
+  font-size: 12px;
+}
+
+.extensions-table tr th,
+.extensions-table tr td {
+  padding: 4px;
+}
+
+.extensions-table th {
+  text-align: left;
+}
+
+.extensions-table thead tr th {
+  border-bottom: 1px solid #212121;
+}
+
+.extensions-table thead tr .controls {
+  width: 48px;
+}
+
+.extensions-table tbody button {
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  background-color: #212121;
+  cursor: pointer;
+  border: none;
+}
+
+.no-extensions {
+  color: #bbbbbb;
+  padding: 4px;
+}
+
+.extension-add-error {
+  color: #f44336;
+  margin: 4px;
+}
+
+.add-extension-button {
+  align-self: flex-start;
+}
+
+.add-extension-button .material-symbols-outlined {
+  margin-right: 4px;
+  font-size: 18px;
 }
 
 button {
