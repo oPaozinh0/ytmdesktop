@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import KeybindInput from "../../components/KeybindInput.vue";
 import ShieldLogo from "../../components/ShieldLogo.vue";
 import YTMDSetting from "../../components/YTMDSetting.vue";
-import { AdblockerFilterSet, ExtensionLoadError, LoadedExtension, StoreSchema, TrayIconStyle, UserExtension } from "~shared/store/schema";
+import { AdblockerFilterSet, BlockedRequestEntry, ExtensionLoadError, LoadedExtension, StoreSchema, TrayIconStyle, UserExtension } from "~shared/store/schema";
 import { AuthToken } from "~shared/integrations/companion-server/types";
 
 declare const YTMD_GIT_COMMIT_HASH: string | undefined;
@@ -54,6 +54,10 @@ const startMinimized = ref<boolean>(general.startMinimized);
 const alwaysShowVolumeSlider = ref<boolean>(appearance.alwaysShowVolumeSlider);
 const customCSSEnabled = ref<boolean>(appearance.customCSSEnabled);
 const customCSSPath = ref<string>(appearance.customCSSPath);
+const inlineCustomCSS = ref<string>(appearance.inlineCustomCSS ?? "");
+const glassThemeEnabled = ref<boolean>(appearance.glassThemeEnabled ?? true);
+const ambientGlowEnabled = ref<boolean>(appearance.ambientGlowEnabled ?? false);
+const accentColor = ref<string>(appearance.accentColor ?? "#ff2e4c");
 const zoom = ref<number>(appearance.zoom);
 const trayIconStyle = ref<number>(appearance.trayIconStyle);
 
@@ -62,6 +66,10 @@ const continueWhereYouLeftOffPaused = ref<boolean>(playback.continueWhereYouLeft
 const enableSpeakerFill = ref<boolean>(playback.enableSpeakerFill);
 const progressInTaskbar = ref<boolean>(playback.progressInTaskbar);
 const ratioVolume = ref<boolean>(playback.ratioVolume);
+const equalizerEnabled = ref<boolean>(playback.equalizerEnabled ?? false);
+const equalizerPreset = ref<string>(playback.equalizerPreset ?? "flat");
+const equalizerBands = ref<number[]>(Array.isArray(playback.equalizerBands) ? [...playback.equalizerBands] : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+const loudnessNormalization = ref<boolean>(playback.loudnessNormalization ?? false);
 
 const companionServerEnabled = ref<boolean>(integrations.companionServerEnabled);
 const companionServerAuthTokens = ref<AuthToken[]>(
@@ -76,6 +84,11 @@ const adblockerEnabled = ref<boolean>(adblocker.blockerEnabled);
 const adblockerFilterSet = ref<number>(adblocker.filterSet);
 const adblockerCosmeticFilteringEnabled = ref<boolean>(adblocker.cosmeticFilteringEnabled);
 const adblockerScriptletsEnabled = ref<boolean>(adblocker.scriptletsEnabled);
+const adblockerTotalBlockedLifetime = ref<number>(adblocker.totalBlockedLifetime ?? 0);
+const adblockerLastFilterUpdateAt = ref<number | null>(adblocker.lastFilterUpdateAt ?? null);
+const adblockerCustomRules = ref<string>(adblocker.customRules ?? "");
+const sponsorBlockEnabled = ref<boolean>(adblocker.sponsorBlockEnabled ?? true);
+const sponsorBlockCategories = ref<string[]>(Array.isArray(adblocker.sponsorBlockCategories) ? [...adblocker.sponsorBlockCategories] : ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"]);
 const extensionsEnabled = ref<boolean>(adblocker.extensionsEnabled);
 const userExtensions = ref<UserExtension[]>(adblocker.extensions ?? []);
 const extensionAddError = ref<string | null>(null);
@@ -104,6 +117,10 @@ store.onDidAnyChange(async newState => {
   alwaysShowVolumeSlider.value = newState.appearance.alwaysShowVolumeSlider;
   customCSSEnabled.value = newState.appearance.customCSSEnabled;
   customCSSPath.value = newState.appearance.customCSSPath;
+  inlineCustomCSS.value = newState.appearance.inlineCustomCSS ?? "";
+  glassThemeEnabled.value = newState.appearance.glassThemeEnabled ?? true;
+  ambientGlowEnabled.value = newState.appearance.ambientGlowEnabled ?? false;
+  accentColor.value = newState.appearance.accentColor ?? "#ff2e4c";
   zoom.value = newState.appearance.zoom;
   trayIconStyle.value = newState.appearance.trayIconStyle;
 
@@ -112,6 +129,10 @@ store.onDidAnyChange(async newState => {
   enableSpeakerFill.value = newState.playback.enableSpeakerFill;
   progressInTaskbar.value = newState.playback.progressInTaskbar;
   ratioVolume.value = newState.playback.ratioVolume;
+  equalizerEnabled.value = newState.playback.equalizerEnabled ?? false;
+  equalizerPreset.value = newState.playback.equalizerPreset ?? "flat";
+  equalizerBands.value = Array.isArray(newState.playback.equalizerBands) ? [...newState.playback.equalizerBands] : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  loudnessNormalization.value = newState.playback.loudnessNormalization ?? false;
 
   companionServerEnabled.value = newState.integrations.companionServerEnabled;
   companionServerAuthTokens.value = safeStorageAvailable.value
@@ -128,6 +149,11 @@ store.onDidAnyChange(async newState => {
   adblockerFilterSet.value = newState.adblocker.filterSet;
   adblockerCosmeticFilteringEnabled.value = newState.adblocker.cosmeticFilteringEnabled;
   adblockerScriptletsEnabled.value = newState.adblocker.scriptletsEnabled;
+  adblockerTotalBlockedLifetime.value = newState.adblocker.totalBlockedLifetime ?? 0;
+  adblockerLastFilterUpdateAt.value = newState.adblocker.lastFilterUpdateAt ?? null;
+  adblockerCustomRules.value = newState.adblocker.customRules ?? "";
+  sponsorBlockEnabled.value = newState.adblocker.sponsorBlockEnabled ?? true;
+  sponsorBlockCategories.value = Array.isArray(newState.adblocker.sponsorBlockCategories) ? [...newState.adblocker.sponsorBlockCategories] : [];
   extensionsEnabled.value = newState.adblocker.extensionsEnabled;
   userExtensions.value = newState.adblocker.extensions ?? [];
 
@@ -165,6 +191,10 @@ const lastFMAuthenticationStep = ref<number>(await memoryStore.get("lastFMAuthen
 const adblockerReady = ref<boolean>(await memoryStore.get("adblockerReady"));
 const adblockerFailed = ref<boolean>(await memoryStore.get("adblockerFailed"));
 const adblockerBlockedCount = ref<number>((await memoryStore.get("adblockerBlockedCount")) ?? 0);
+const adblockerRecentBlocked = ref<BlockedRequestEntry[]>((await memoryStore.get("adblockerRecentBlocked")) ?? []);
+const adblockerRefreshing = ref<boolean>((await memoryStore.get("adblockerRefreshing")) ?? false);
+const showBlockedLog = ref(false);
+const customRulesSavedNote = ref(false);
 const extensionsLoaded = ref<LoadedExtension[]>((await memoryStore.get("extensionsLoaded")) ?? []);
 const extensionsLoadErrors = ref<ExtensionLoadError[]>((await memoryStore.get("extensionsLoadErrors")) ?? []);
 
@@ -203,9 +233,145 @@ memoryStore.onStateChanged(newState => {
   adblockerReady.value = newState.adblockerReady;
   adblockerFailed.value = newState.adblockerFailed;
   adblockerBlockedCount.value = newState.adblockerBlockedCount ?? 0;
+  adblockerRecentBlocked.value = newState.adblockerRecentBlocked ?? [];
+  adblockerRefreshing.value = newState.adblockerRefreshing ?? false;
   extensionsLoaded.value = newState.extensionsLoaded ?? [];
   extensionsLoadErrors.value = newState.extensionsLoadErrors ?? [];
 });
+
+const EQ_BAND_LABELS = ["32Hz", "64Hz", "125Hz", "250Hz", "500Hz", "1kHz", "2kHz", "4kHz", "8kHz", "16kHz"];
+const EQ_PRESETS: Record<string, { label: string; bands: number[] }> = {
+  flat: { label: "Flat", bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  bass_boost: { label: "Bass Boost", bands: [6, 5, 4, 2, 1, 0, 0, 0, 1, 1] },
+  rock_metal: { label: "Rock / Metal", bands: [4, 3, 1, -1, -2, 0, 2, 3, 4, 4] },
+  electronic: { label: "Electronic", bands: [5, 4, 2, 0, -2, 1, 2, 3, 4, 5] },
+  vocal: { label: "Vocal Clarity", bands: [-2, -2, 0, 2, 4, 4, 3, 1, 0, -1] },
+  acoustic: { label: "Acoustic", bands: [3, 2, 1, 1, 2, 1, 2, 3, 3, 2] },
+  custom: { label: "Custom", bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+};
+
+const ACCENT_SWATCHES = [
+  { name: "Crimson Shield", hex: "#ff2e4c" },
+  { name: "Electric Violet", hex: "#7c5cff" },
+  { name: "Cyan Pulse", hex: "#00d2ff" },
+  { name: "Emerald", hex: "#10b981" },
+  { name: "Amber Gold", hex: "#f59e0b" },
+  { name: "Rose", hex: "#f43f5e" }
+];
+
+const SPONSORBLOCK_CATEGORY_LABELS: Array<{ id: string; label: string }> = [
+  { id: "sponsor", label: "Sponsor" },
+  { id: "selfpromo", label: "Self-Promo" },
+  { id: "interaction", label: "Interaction" },
+  { id: "intro", label: "Intro" },
+  { id: "outro", label: "Outro" },
+  { id: "preview", label: "Preview" },
+  { id: "music_offtopic", label: "Non-Music Section" }
+];
+
+const CSS_SNIPPETS: Array<{ label: string; css: string }> = [
+  {
+    label: "Compact Sidebar",
+    css: "ytmusic-guide-renderer { width: 180px !important; }"
+  },
+  {
+    label: "Rounded Album Art",
+    css: "#song-image img, ytmusic-player #thumbnail img { border-radius: 16px !important; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55) !important; }"
+  },
+  {
+    label: "Accent Player Bar Glow",
+    css: "ytmusic-player-bar { border-top: 1px solid rgba(var(--ytmd-accent-rgb), 0.35) !important; }"
+  }
+];
+
+function hexToRgbString(hex: string): string {
+  const cleaned = (hex || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    const r = parseInt(cleaned.slice(0, 2), 16);
+    const g = parseInt(cleaned.slice(2, 4), 16);
+    const b = parseInt(cleaned.slice(4, 6), 16);
+    return `${r}, ${g}, ${b}`;
+  }
+  return "255, 46, 76";
+}
+
+const settingsAccentStyle = computed(() => {
+  const rgb = hexToRgbString(accentColor.value);
+  return {
+    "--accent-primary": accentColor.value,
+    "--accent-hover": accentColor.value,
+    "--accent-soft": `rgba(${rgb}, 0.16)`,
+    "--accent-glow": `rgba(${rgb}, 0.36)`
+  };
+});
+
+const formattedFilterUpdatedAt = computed(() => {
+  if (!adblockerLastFilterUpdateAt.value) return "Cached";
+  return new Date(adblockerLastFilterUpdateAt.value).toLocaleString();
+});
+
+async function refreshFilterListsNow() {
+  if (adblockerRefreshing.value) return;
+  await window.ytmd.adblocker.refreshFilters();
+}
+
+function toggleSponsorBlockCategory(categoryId: string) {
+  const idx = sponsorBlockCategories.value.indexOf(categoryId);
+  if (idx >= 0) {
+    sponsorBlockCategories.value.splice(idx, 1);
+  } else {
+    sponsorBlockCategories.value.push(categoryId);
+  }
+  store.set("adblocker.sponsorBlockCategories", [...sponsorBlockCategories.value]);
+}
+
+function applyCustomRules() {
+  store.set("adblocker.customRules", adblockerCustomRules.value);
+  customRulesSavedNote.value = true;
+  setTimeout(() => {
+    customRulesSavedNote.value = false;
+  }, 2000);
+}
+
+function selectAccentColor(hex: string) {
+  accentColor.value = hex;
+  store.set("appearance.accentColor", hex);
+}
+
+function updateInlineCustomCSS() {
+  store.set("appearance.inlineCustomCSS", inlineCustomCSS.value);
+}
+
+function applyCssSnippet(snippetCss: string) {
+  const current = inlineCustomCSS.value.trim();
+  inlineCustomCSS.value = current ? `${current}\n${snippetCss}` : snippetCss;
+  customCSSEnabled.value = true;
+  store.set("appearance.customCSSEnabled", true);
+  store.set("appearance.inlineCustomCSS", inlineCustomCSS.value);
+}
+
+function selectEqPreset() {
+  if (equalizerPreset.value !== "custom" && EQ_PRESETS[equalizerPreset.value]) {
+    equalizerBands.value = [...EQ_PRESETS[equalizerPreset.value].bands];
+    store.set("playback.equalizerBands", [...equalizerBands.value]);
+  }
+  store.set("playback.equalizerPreset", equalizerPreset.value);
+}
+
+function updateEqBand(index: number, event: Event) {
+  const val = Number((event.target as HTMLInputElement).value);
+  equalizerBands.value[index] = val;
+  equalizerPreset.value = "custom";
+  store.set("playback.equalizerPreset", "custom");
+  store.set("playback.equalizerBands", [...equalizerBands.value]);
+}
+
+function resetEqBands() {
+  equalizerPreset.value = "flat";
+  equalizerBands.value = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  store.set("playback.equalizerPreset", "flat");
+  store.set("playback.equalizerBands", [...equalizerBands.value]);
+}
 
 type SearchEntry = {
   tab: number;
@@ -219,15 +385,21 @@ const searchableSettings: SearchEntry[] = [
   { tab: 6, tabLabel: "Ad Shield", title: "Filter lists", description: "Choose between Ads only, Ads and trackers, or Full protection" },
   { tab: 6, tabLabel: "Ad Shield", title: "Cosmetic filtering", description: "Hide empty ad containers inside YouTube Music" },
   { tab: 6, tabLabel: "Ad Shield", title: "Scriptlet injection", description: "Anti-ad scripts to stop in-stream ads between songs" },
+  { tab: 6, tabLabel: "Ad Shield", title: "SponsorBlock skipping", description: "Automatically skip sponsor, intro, outro, and non-music segments" },
+  { tab: 6, tabLabel: "Ad Shield", title: "Custom filter rules & allowlist", description: "Add custom ABP/uBO rules and inspect recently blocked requests" },
   { tab: 6, tabLabel: "Ad Shield", title: "Browser extensions", description: "Load unpacked Chrome Manifest V2 extensions such as uBlock Origin" },
   { tab: 1, tabLabel: "General", title: "Hide to tray on close", description: "Keep playback alive in the system tray when closing the window" },
   { tab: 1, tabLabel: "General", title: "Show notification on song change", description: "Desktop notifications when a track changes" },
   { tab: 1, tabLabel: "General", title: "Start on boot", description: "Launch YTM Shield automatically with your OS" },
   { tab: 1, tabLabel: "General", title: "Disable hardware acceleration", description: "Useful if experiencing GPU flickering (requires restart)" },
+  { tab: 2, tabLabel: "Appearance", title: "YTM Shield Glass theme & ambient glow", description: "Frosted glass navigation, player bar, and dynamic glow inside YouTube Music" },
+  { tab: 2, tabLabel: "Appearance", title: "Accent color", description: "Customize brand highlight color across TitleBar, Miniplayer, Settings, and YTM" },
   { tab: 2, tabLabel: "Appearance", title: "Always show volume slider", description: "Keep the volume slider visible on legacy player bars" },
-  { tab: 2, tabLabel: "Appearance", title: "Custom CSS", description: "Apply your own stylesheet to YouTube Music" },
+  { tab: 2, tabLabel: "Appearance", title: "Live Custom CSS editor & snippets", description: "Write instant live-reloading CSS or use 1-click YTM visual tweaks" },
   { tab: 2, tabLabel: "Appearance", title: "Zoom", description: "Scale interface zoom from 30% to 300%" },
   { tab: 2, tabLabel: "Appearance", title: "Tray icon style", description: "Choose Auto, White, or Black tray icon on Linux" },
+  { tab: 3, tabLabel: "Playback", title: "10-Band Audio Equalizer", description: "Graphic equalizer with presets from 32Hz to 16kHz" },
+  { tab: 3, tabLabel: "Playback", title: "Loudness Normalization", description: "Dynamic compressor to balance volume across quiet and loud tracks" },
   { tab: 3, tabLabel: "Playback", title: "Continue where you left off", description: "Resume previous song or playlist automatically on launch" },
   { tab: 3, tabLabel: "Playback", title: "Pause on application launch", description: "Restore queue in paused state" },
   { tab: 3, tabLabel: "Playback", title: "Show track progress on taskbar", description: "Display playback progress bar in the OS taskbar" },
@@ -305,6 +477,9 @@ async function settingsChanged() {
 
   store.set("appearance.alwaysShowVolumeSlider", alwaysShowVolumeSlider.value);
   store.set("appearance.customCSSEnabled", customCSSEnabled.value);
+  store.set("appearance.glassThemeEnabled", glassThemeEnabled.value);
+  store.set("appearance.ambientGlowEnabled", ambientGlowEnabled.value);
+  store.set("appearance.accentColor", accentColor.value);
   store.set("appearance.zoom", zoom.value);
   store.set("appearance.trayIconStyle", trayIconStyle.value);
 
@@ -313,6 +488,10 @@ async function settingsChanged() {
   store.set("playback.progressInTaskbar", progressInTaskbar.value);
   store.set("playback.enableSpeakerFill", enableSpeakerFill.value);
   store.set("playback.ratioVolume", ratioVolume.value);
+  store.set("playback.equalizerEnabled", equalizerEnabled.value);
+  store.set("playback.equalizerPreset", equalizerPreset.value);
+  store.set("playback.equalizerBands", [...equalizerBands.value]);
+  store.set("playback.loudnessNormalization", loudnessNormalization.value);
 
   store.set("integrations.companionServerEnabled", companionServerEnabled.value);
   store.set("integrations.companionServerCORSWildcardEnabled", companionServerCORSWildcardEnabled.value);
@@ -325,6 +504,7 @@ async function settingsChanged() {
   store.set("adblocker.filterSet", adblockerFilterSet.value);
   store.set("adblocker.cosmeticFilteringEnabled", adblockerCosmeticFilteringEnabled.value);
   store.set("adblocker.scriptletsEnabled", adblockerScriptletsEnabled.value);
+  store.set("adblocker.sponsorBlockEnabled", sponsorBlockEnabled.value);
   store.set("adblocker.extensionsEnabled", extensionsEnabled.value);
 
   store.set("shortcuts.playPause", shortcutPlayPause.value);
@@ -446,7 +626,10 @@ function stepLastFMAuth() {
 </script>
 
 <template>
-  <div class="settings-container">
+  <div
+    class="settings-container"
+    :style="settingsAccentStyle"
+  >
     <div class="content-container">
       <aside class="sidebar">
         <div class="sidebar-brand">
@@ -636,6 +819,33 @@ function stepLastFMAuth() {
               </div>
             </div>
 
+              <div
+                v-if="adblockerEnabled"
+                class="shield-stats-row"
+              >
+                <div class="stat-card">
+                  <span class="stat-label">Session Blocked</span>
+                  <span class="stat-value">{{ adblockerBlockedCount.toLocaleString() }}</span>
+                  <span class="stat-sub">Since launch</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Lifetime Blocked</span>
+                  <span class="stat-value">{{ adblockerTotalBlockedLifetime.toLocaleString() }}</span>
+                  <span class="stat-sub">Persisted across sessions</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Filter Lists</span>
+                  <span class="stat-sub">{{ formattedFilterUpdatedAt }}</span>
+                  <button
+                    class="secondary-btn"
+                    :disabled="adblockerRefreshing"
+                    @click="refreshFilterListsNow"
+                  >
+                    {{ adblockerRefreshing ? "Updating..." : "Update Filter Lists Now" }}
+                  </button>
+                </div>
+              </div>
+
             <div
               v-if="adblockerEnabled"
               class="protection-strip"
@@ -703,6 +913,105 @@ function stepLastFMAuth() {
               description="Runs anti-ad scriptlets to stop ads served between tracks from the same media origin. Disable only if playback misbehaves."
               @change="settingsChanged"
             />
+
+            <div class="subsection-title">
+              SponsorBlock Integration
+            </div>
+
+            <YTMDSetting
+              v-model="sponsorBlockEnabled"
+              type="checkbox"
+              name="Auto-skip SponsorBlock segments"
+              description="Queries sponsor.ajay.app privacy-preserving SHA-256 hash prefixes to skip non-music segments"
+              @change="settingsChanged"
+            />
+
+            <YTMDSetting
+              v-if="sponsorBlockEnabled"
+              type="custom"
+              flex-column
+              indented
+              name="Segment categories to skip"
+              description="Choose which crowdsourced segment categories trigger automatic seek"
+            >
+              <div class="sb-cat-grid">
+                <button
+                  v-for="cat in SPONSORBLOCK_CATEGORY_LABELS"
+                  :key="cat.id"
+                  class="sb-cat-chip"
+                  :class="{ active: sponsorBlockCategories.includes(cat.id) }"
+                  @click="toggleSponsorBlockCategory(cat.id)"
+                >
+                  {{ cat.label }}
+                </button>
+              </div>
+            </YTMDSetting>
+
+            <div class="subsection-title">
+              Custom Filter Rules & Allowlist
+            </div>
+
+            <YTMDSetting
+              type="custom"
+              flex-column
+              name="Custom ABP / uBO rules"
+              description="One rule per line (e.g. ||example-ads.com^ to block, @@||trusted-domain.com^ to allowlist)"
+            >
+              <textarea
+                v-model="adblockerCustomRules"
+                class="rules-textarea"
+                placeholder="||ad-domain.example^&#10;@@||allowlisted-domain.example^"
+              />
+              <div class="inline-card-row">
+                <span class="inline-card-text">
+                  {{ customRulesSavedNote ? "Custom rules applied!" : "Click Apply to compile rules into the active shield engine." }}
+                </span>
+                <button
+                  class="primary-btn-sm"
+                  @click="applyCustomRules"
+                >
+                  Apply Custom Rules
+                </button>
+              </div>
+            </YTMDSetting>
+
+            <YTMDSetting
+              type="custom"
+              flex-column
+              name="Recent blocked requests"
+              description="Latest 30 requests intercepted by Ad Shield during this session"
+            >
+              <div class="inline-card-row">
+                <span class="inline-card-text">{{ adblockerRecentBlocked.length }} recent events captured</span>
+                <button
+                  class="secondary-btn"
+                  @click="showBlockedLog = !showBlockedLog"
+                >
+                  {{ showBlockedLog ? "Hide Log" : "View Blocked Log" }}
+                </button>
+              </div>
+              <div
+                v-if="showBlockedLog"
+                class="blocked-log-list"
+              >
+                <div
+                  v-if="adblockerRecentBlocked.length === 0"
+                  class="empty-extensions"
+                >
+                  No blocked requests recorded yet this session.
+                </div>
+                <div
+                  v-for="(entry, idx) in adblockerRecentBlocked"
+                  :key="`${entry.timestamp}-${idx}`"
+                  class="blocked-log-row"
+                >
+                  <span class="blocked-log-url">{{ entry.url }}</span>
+                  <span class="blocked-log-meta">
+                    {{ entry.resourceType }} • {{ entry.filter || "rule match" }} • {{ new Date(entry.timestamp).toLocaleTimeString() }}
+                  </span>
+                </div>
+              </div>
+            </YTMDSetting>
 
             <div class="subsection-title">
               Chrome Extensions
@@ -820,6 +1129,38 @@ function stepLastFMAuth() {
             class="appearance-tab"
           >
             <YTMDSetting
+              v-model="glassThemeEnabled"
+              type="checkbox"
+              name="YTM Shield Glass theme"
+              description="Apply native dark frosted-glass navigation, sidebar, player bar, and custom scrollbars inside YouTube Music"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="ambientGlowEnabled"
+              type="checkbox"
+              name="Ambient dynamic background glow"
+              description="Subtle radial accent glow behind the YouTube Music library and player canvas"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              type="custom"
+              flex-column
+              name="Accent highlight color"
+              description="Customize primary accent across YTM Shield TitleBar, Miniplayer, Settings, and YouTube Music controls"
+            >
+              <div class="swatch-row">
+                <button
+                  v-for="swatch in ACCENT_SWATCHES"
+                  :key="swatch.hex"
+                  class="accent-swatch"
+                  :class="{ active: accentColor.toLowerCase() === swatch.hex.toLowerCase() }"
+                  :style="{ backgroundColor: swatch.hex }"
+                  :title="swatch.name"
+                  @click="selectAccentColor(swatch.hex)"
+                />
+              </div>
+            </YTMDSetting>
+            <YTMDSetting
               v-model="alwaysShowVolumeSlider"
               type="checkbox"
               name="Always show volume slider"
@@ -830,16 +1171,41 @@ function stepLastFMAuth() {
               v-model="customCSSEnabled"
               type="checkbox"
               name="Custom CSS"
-              description="Inject a personal CSS file into the YouTube Music view"
+              description="Enable inline live CSS and optional external stylesheet injection"
               @change="settingsChanged"
             />
+            <YTMDSetting
+              v-if="customCSSEnabled"
+              type="custom"
+              flex-column
+              indented
+              name="Live CSS editor & quick snippets"
+              description="Changes apply instantaneously to YouTube Music with zero reload"
+            >
+              <div class="snippet-row">
+                <button
+                  v-for="snippet in CSS_SNIPPETS"
+                  :key="snippet.label"
+                  class="snippet-btn"
+                  @click="applyCssSnippet(snippet.css)"
+                >
+                  + {{ snippet.label }}
+                </button>
+              </div>
+              <textarea
+                v-model="inlineCustomCSS"
+                class="css-editor-textarea"
+                placeholder="/* Write custom CSS here — changes apply live */"
+                @input="updateInlineCustomCSS"
+              />
+            </YTMDSetting>
             <YTMDSetting
               v-if="customCSSEnabled"
               v-model="customCSSPath"
               type="file"
               indented
               bind-setting="appearance.customCSSPath"
-              name="Custom CSS file path"
+              name="External CSS file path (optional)"
               @file-change="settingChangedFile"
               @clear="removeCustomCSSPath"
             />
@@ -904,6 +1270,72 @@ function stepLastFMAuth() {
               description="Use smoother perceptual volume curve control"
               @change="settingsChanged"
             />
+
+            <div class="subsection-title">
+              Audio Engine (Web Audio API)
+            </div>
+
+            <YTMDSetting
+              v-model="loudnessNormalization"
+              type="checkbox"
+              name="Loudness normalization"
+              description="Real-time dynamics compressor to level volume differences across tracks"
+              @change="settingsChanged"
+            />
+
+            <YTMDSetting
+              v-model="equalizerEnabled"
+              type="checkbox"
+              name="10-Band graphic equalizer"
+              description="Shape sound frequency response live across 32Hz – 16kHz"
+              @change="settingsChanged"
+            />
+
+            <div
+              v-if="equalizerEnabled"
+              class="eq-card"
+            >
+              <div class="eq-header">
+                <select
+                  v-model="equalizerPreset"
+                  class="eq-preset-select"
+                  @change="selectEqPreset"
+                >
+                  <option
+                    v-for="(preset, key) in EQ_PRESETS"
+                    :key="key"
+                    :value="key"
+                  >
+                    Preset: {{ preset.label }}
+                  </option>
+                </select>
+                <button
+                  class="secondary-btn"
+                  @click="resetEqBands"
+                >
+                  Reset Flat
+                </button>
+              </div>
+              <div class="eq-bands-grid">
+                <div
+                  v-for="(freq, idx) in EQ_BAND_LABELS"
+                  :key="freq"
+                  class="eq-band-col"
+                >
+                  <span class="eq-db-val">{{ equalizerBands[idx] > 0 ? `+${equalizerBands[idx]}` : equalizerBands[idx] }}dB</span>
+                  <input
+                    type="range"
+                    min="-12"
+                    max="12"
+                    step="1"
+                    :value="equalizerBands[idx]"
+                    class="eq-vertical-slider"
+                    @input="updateEqBand(idx, $event)"
+                  >
+                  <span class="eq-freq-label">{{ freq }}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div
@@ -2257,5 +2689,226 @@ function stepLastFMAuth() {
 
 .about-link-btn .material-symbols-outlined {
   font-size: 16px;
+}
+
+.shield-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.stat-sub {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.sb-cat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sb-cat-chip {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.sb-cat-chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: #ffffff;
+}
+
+.rules-textarea,
+.css-editor-textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(8, 9, 14, 0.85);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.css-editor-textarea {
+  min-height: 140px;
+}
+
+.blocked-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.blocked-log-row {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.blocked-log-url {
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blocked-log-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.accent-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+
+.accent-swatch:hover {
+  transform: scale(1.1);
+}
+
+.accent-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+.snippet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.snippet-btn {
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.snippet-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.eq-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.eq-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.eq-preset-select {
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(14, 15, 22, 0.9);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.eq-bands-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.eq-band-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.eq-db-val {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.eq-vertical-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px;
+  height: 116px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.eq-freq-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 </style>

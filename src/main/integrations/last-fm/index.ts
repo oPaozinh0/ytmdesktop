@@ -96,21 +96,12 @@ export default class LastFM extends Integration {
     const configStore = this.getService(ConfigStore);
     const decryptedValues = configStore.get("lastfm");
 
-    // Grab the session key and token from the store and decrypt them
+    // Grab the session key from the store and decrypt it
     if (decryptedValues.sessionKey) {
       try {
         decryptedValues.sessionKey = (await safeStorage.decryptStringAsync(Buffer.from(decryptedValues.sessionKey, "hex"))).result;
       } catch (e) {
         decryptedValues.sessionKey = null;
-        log.error(e);
-      }
-    }
-
-    if (decryptedValues.token) {
-      try {
-        decryptedValues.token = (await safeStorage.decryptStringAsync(Buffer.from(decryptedValues.token, "hex"))).result;
-      } catch (e) {
-        decryptedValues.token = null;
         log.error(e);
       }
     }

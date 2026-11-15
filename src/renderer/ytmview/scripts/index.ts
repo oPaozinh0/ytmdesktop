@@ -5,7 +5,7 @@ import protectedapimanager from "./protectedapimanager";
 import { createMaterialSymbolsLink, createStyleSheet } from "./setup/styles";
 import { createNavigationMenuArrows } from "./setup/navigation";
 import initRemote from "./setup/remote";
-import { addTimedLyrics, createAdditionalPlayerBarControls, hideChromecastButton, overrideHistoryButtonDisplay } from "./setup/extras";
+import { addTimedLyrics, createAdditionalPlayerBarControls, hideChromecastButton, initAudioEngineAndSponsorBlock, overrideHistoryButtonDisplay } from "./setup/extras";
 
 protectedapimanager.init();
 ytmhook.init();
@@ -71,6 +71,7 @@ window.addEventListener("load", async () => {
       hideChromecastButton();
       createAdditionalPlayerBarControls(); // Sort of broken as of new YTM player bar (10/03/26)
       addTimedLyrics();
+      initAudioEngineAndSponsorBlock();
 
       setupCompletions |= YTMViewSetupCompletionFlags.Extras;
     }

@@ -5,10 +5,6 @@ import YTMViewManager from "../services/ytmviewmanager";
 import Service from "../services/service";
 import IntegrationManager from "../services/integrationmanager";
 
-// Enforces TypeScript to not allow overriding a method (MUST NOT BE EXPORTED)
-declare const _never: unique symbol;
-type NoOverride = { [_never]: typeof _never };
-
 export default abstract class Integration {
   /**
    * The name of the integration

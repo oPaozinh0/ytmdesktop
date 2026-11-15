@@ -1,4 +1,5 @@
 import { app, clipboard, dialog, ipcMain, Menu, MenuItemConstructorOptions, nativeTheme, powerMonitor, safeStorage, screen, shell, Tray } from "electron";
+import crypto from "node:crypto";
 import log from "electron-log";
 import { getIconPath, v1ConfigMigration } from "./util";
 import { AppView } from "./services/windowmanager/appview";
@@ -26,11 +27,11 @@ import AppWindowManager from "./services/windowmanager";
 import { ServiceCollection } from "./services/servicecollection";
 import StateManager from "./services/statemanager";
 import MemoryStore from "./services/memorystore";
-import { MemoryStoreSchema, TrayIconStyle } from "~shared/store/schema";
+import { MemoryStoreSchema, SleepTimerMode, SponsorBlockSegment, TrayIconStyle } from "~shared/store/schema";
 import ProtocolManager from "./services/protocolmanager";
 import PlayerStateStore from "./services/playerstatestore";
 import ProtectedAPIManager from "./services/protectedapimanager";
-import { VideoType } from "~shared/playerstatestore/types";
+import { VideoState, VideoType } from "~shared/playerstatestore/types";
 
 declare const ALL_WINDOWS_VITE_DEV_SERVER_URL: string;
 
@@ -110,7 +111,7 @@ integrationManager.createIntegrations([Adblocker, Extensions, CompanionServer, D
 integrationManager.runHook(IntegrationManagerHook.AppBeforeReady);
 
 let tray: Tray;
-let trayContextMenu;
+let trayContextMenu: Menu;
 app.on("ready", async () => {
   log.info("Application ready");
 
@@ -208,6 +209,129 @@ app.on("ready", async () => {
 
     const encrypt = await safeStorage.encryptStringAsync(value);
     return encrypt.toString("hex");
+  });
+  //#endregion
+
+  //#region v3.0 Main Services: SponsorBlock & Sleep Timer
+  const sponsorBlockCache = new Map<string, { expiresAt: number; segments: SponsorBlockSegment[] }>();
+  const SPONSORBLOCK_TTL_MS = 15 * 60 * 1000;
+
+  ipcMain.handle("sponsorblock:getSegments", async (_event, videoId: string, categories: string[]): Promise<SponsorBlockSegment[]> => {
+    if (typeof videoId !== "string" || !/^[a-zA-Z0-9_-]{6,20}$/.test(videoId)) return [];
+    const safeCategories = Array.isArray(categories) ? categories.filter((c): c is string => typeof c === "string" && c.length > 0) : [];
+    if (safeCategories.length === 0) return [];
+
+    const cacheKey = `${videoId}:${[...safeCategories].sort().join(",")}`;
+    const cached = sponsorBlockCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.segments;
+    }
+
+    try {
+      const hashPrefix = crypto.createHash("sha256").update(videoId).digest("hex").slice(0, 4);
+      const url = `https://sponsor.ajay.app/api/skipSegments/${hashPrefix}?categories=${encodeURIComponent(JSON.stringify(safeCategories))}`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+
+      if (response.status === 404) {
+        sponsorBlockCache.set(cacheKey, { expiresAt: Date.now() + SPONSORBLOCK_TTL_MS, segments: [] });
+        return [];
+      }
+      if (!response.ok) return [];
+
+      const payload = (await response.json()) as Array<{
+        videoID?: string;
+        segments?: Array<{
+          UUID: string;
+          segment: [number, number];
+          category: string;
+          actionType: string;
+          videoDuration?: number;
+        }>;
+      }>;
+      const matchedVideo = Array.isArray(payload) ? payload.find(entry => entry.videoID === videoId) : undefined;
+      const segments: SponsorBlockSegment[] = Array.isArray(matchedVideo?.segments)
+        ? matchedVideo.segments.filter(seg => Array.isArray(seg.segment) && seg.segment.length >= 2)
+        : [];
+
+      sponsorBlockCache.set(cacheKey, { expiresAt: Date.now() + SPONSORBLOCK_TTL_MS, segments });
+      return segments;
+    } catch (error) {
+      log.debug("SponsorBlock lookup skipped:", error);
+      return [];
+    }
+  });
+
+  let sleepTimerTimeout: NodeJS.Timeout | null = null;
+  let sleepTimerMode: SleepTimerMode = "off";
+  let sleepTimerStartVideoId: string | null = null;
+  let sleepTimerArmedAt = 0;
+
+  let trayRebuildTimer: NodeJS.Timeout | null = null;
+  let scheduleTrayRebuild: () => void = () => {};
+
+  function syncSleepTimerState(mode: SleepTimerMode, endTime: number | null) {
+    sleepTimerMode = mode;
+    memoryStore.set("sleepTimerMode", mode);
+    memoryStore.set("sleepTimerEndTime", endTime);
+    scheduleTrayRebuild();
+  }
+
+  function clearSleepTimer() {
+    if (sleepTimerTimeout) {
+      clearTimeout(sleepTimerTimeout);
+      sleepTimerTimeout = null;
+    }
+    sleepTimerStartVideoId = null;
+    syncSleepTimerState("off", null);
+  }
+
+  function pausePlaybackFromSleepTimer() {
+    const state = playerStateStore.getState();
+    clearSleepTimer();
+    if (state.trackState === VideoState.Playing) {
+      const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
+      remoteControlApi.postMessage("execute", "pause");
+    }
+  }
+
+  function setSleepTimer(option: number | "end_of_track") {
+    if (sleepTimerTimeout) {
+      clearTimeout(sleepTimerTimeout);
+      sleepTimerTimeout = null;
+    }
+
+    if (option === "end_of_track") {
+      sleepTimerStartVideoId = playerStateStore.getState().videoDetails?.id ?? null;
+      sleepTimerArmedAt = Date.now();
+      syncSleepTimerState("end_of_track", null);
+    } else if (typeof option === "number" && option > 0) {
+      const endTime = Date.now() + option * 60_000;
+      sleepTimerTimeout = setTimeout(() => {
+        pausePlaybackFromSleepTimer();
+      }, option * 60_000);
+      syncSleepTimerState("timed", endTime);
+    } else {
+      clearSleepTimer();
+    }
+  }
+
+  ipcMain.on("sleepTimer:set", (_event, option: number | "end_of_track") => {
+    setSleepTimer(option);
+  });
+
+  playerStateStore.on("state-changed", state => {
+    if (sleepTimerMode === "end_of_track") {
+      if (!sleepTimerStartVideoId && state.videoDetails?.id) {
+        sleepTimerStartVideoId = state.videoDetails.id;
+      } else if (
+        sleepTimerStartVideoId &&
+        state.videoDetails?.id &&
+        state.videoDetails.id !== sleepTimerStartVideoId &&
+        Date.now() - sleepTimerArmedAt > 1500
+      ) {
+        pausePlaybackFromSleepTimer();
+      }
+    }
   });
   //#endregion
 
@@ -328,7 +452,7 @@ app.on("ready", async () => {
     }
   });
 
-  mainWindow.ipcOn("window:openSettings", (_event, initialTab?: number) => {
+  function openOrFocusSettings(initialTab?: number) {
     memoryStore.set("settingsInitialTab", typeof initialTab === "number" ? initialTab : null);
 
     if (windowManager.hasWindow("Settings")) {
@@ -385,9 +509,9 @@ app.on("ready", async () => {
         action: "deny"
       };
     });
-  });
+  }
 
-  mainWindow.ipcOn("window:openMiniplayer", () => {
+  function openOrFocusMiniplayer() {
     if (windowManager.hasWindow("Miniplayer")) {
       windowManager.getWindow("Miniplayer").showAndFocus();
       return;
@@ -397,6 +521,10 @@ app.on("ready", async () => {
     const windowBounds = configStore.get("state.miniplayerWindowBounds");
 
     const mainWindowBounds = mainWindow._getElectronWindow().getBounds();
+    let miniplayerCompact = false;
+    let savedNormalSize: { width: number; height: number } | null = null;
+    memoryStore.set("miniplayerCompactMode", false);
+
     const miniplayerWindow = windowManager.createWindow("Browser", {
       name: "Miniplayer",
       autoRecreate: false,
@@ -405,8 +533,8 @@ app.on("ready", async () => {
       electronOptions: {
         width: windowBounds?.width ?? 600 / scaleFactor,
         height: windowBounds?.height ?? 400 / scaleFactor,
-        minWidth: 240,
-        minHeight: 240,
+        minWidth: 280,
+        minHeight: 340,
         x: windowBounds?.x ?? Math.round(mainWindowBounds.x + (mainWindowBounds.width / 2 - 400)),
         y: windowBounds?.y ?? Math.round(mainWindowBounds.y + (mainWindowBounds.height / 2 - 300)),
         minimizable: false,
@@ -425,6 +553,10 @@ app.on("ready", async () => {
     // On mac and windows `pop-up-menu` will keep the miniplayer above the dock or taskbar
     miniplayerWindow._getElectronWindow().setAlwaysOnTop(true, "pop-up-menu");
     miniplayerWindow.on("electronwindow-will-resize", () => {
+      if (miniplayerCompact) {
+        miniplayerWindow.setAspectRatio(0);
+        return;
+      }
       const playerState = playerStateStore.getState();
       if (playerState.videoDetails?.videoType === VideoType.MusicVideo) {
         miniplayerWindow.setAspectRatio(16 / 9);
@@ -433,20 +565,27 @@ app.on("ready", async () => {
       }
     });
     miniplayerWindow.on("electronwindow-resize", () => {
-      stateManager.updateState({
-        miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
-      });
+      if (!miniplayerCompact) {
+        stateManager.updateState({
+          miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
+        });
+      }
     });
     miniplayerWindow.on("electronwindow-move", () => {
-      stateManager.updateState({
-        miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
-      });
+      if (!miniplayerCompact) {
+        stateManager.updateState({
+          miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
+        });
+      }
     });
 
     miniplayerWindow.once("electronwindow-close", () => {
-      stateManager.updateState({
-        miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
-      });
+      if (!miniplayerCompact) {
+        stateManager.updateState({
+          miniplayerWindowBounds: miniplayerWindow._getElectronWindow().getBounds()
+        });
+      }
+      memoryStore.set("miniplayerCompactMode", false);
       mainWindow.showAndFocus();
     });
 
@@ -456,11 +595,67 @@ app.on("ready", async () => {
     });
 
     miniplayerWindow.ipcHandle("playerStateStore:getState", () => {
-      const playerStateStore = serviceHost.getService(PlayerStateStore);
       return playerStateStore.getState();
     });
 
+    miniplayerWindow.ipcOn("miniplayer:setCompactMode", (_event, compact: boolean) => {
+      const win = miniplayerWindow._getElectronWindow();
+      const bounds = win.getBounds();
+      if (compact) {
+        if (!miniplayerCompact) {
+          savedNormalSize = { width: bounds.width, height: bounds.height };
+        }
+        miniplayerCompact = true;
+        memoryStore.set("miniplayerCompactMode", true);
+        win.setAspectRatio(0);
+        win.setMinimumSize(360, 96);
+        win.setSize(Math.max(400, bounds.width), 98);
+      } else {
+        miniplayerCompact = false;
+        memoryStore.set("miniplayerCompactMode", false);
+        win.setMinimumSize(280, 340);
+        const targetW = Math.max(320, savedNormalSize?.width ?? bounds.width);
+        const targetH = Math.max(380, savedNormalSize?.height ?? 440);
+        win.setSize(targetW, targetH);
+      }
+    });
+
     mainWindow.hide();
+  }
+
+  mainWindow.ipcOn("window:openSettings", (_event, initialTab?: number) => {
+    openOrFocusSettings(initialTab);
+  });
+
+  mainWindow.ipcOn("window:openMiniplayer", () => {
+    openOrFocusMiniplayer();
+  });
+
+  mainWindow.ipcHandle("playerStateStore:getState", () => {
+    return playerStateStore.getState();
+  });
+
+  mainWindow.ipcOn("remoteControl:execute", (_event, command: string, ...args: unknown[]) => {
+    const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
+    remoteControlApi.postMessage("execute", command, ...args);
+  });
+
+  mainWindow.ipcOn("titlebar:setOverlayOpen", (_event, open: boolean) => {
+    const view = ytmViewManager.getView();
+    if (!view) return;
+    if (open) {
+      view.hide(false);
+      mainWindow.webContents?.focus();
+    } else if (ytmViewManager.status === YTMViewStatus.Ready) {
+      view.show(false);
+    }
+  });
+
+  mainWindow.ipcOn("ytmView:search", (_event, query: string) => {
+    const view = ytmViewManager.getView();
+    const trimmed = typeof query === "string" ? query.trim() : "";
+    if (!view || !trimmed) return;
+    view.webContents?.send("ytmView:navigateSearch", trimmed);
   });
 
   mainWindow.ipcOn("ytmView:navigateDefault", () => {
@@ -516,72 +711,189 @@ app.on("ready", async () => {
     tray.setImage(getTrayIconPath());
   }
 
-  tray = new Tray(getTrayIconPath());
-  trayContextMenu = Menu.buildFromTemplate([
-    {
-      label: "YTM Shield",
-      type: "normal",
-      enabled: false
-    },
-    {
-      type: "separator"
-    },
-    {
-      label: "Show/Hide Window",
-      type: "normal",
-      click: () => {
-        if (windowManager.hasWindow("Miniplayer")) {
-          windowManager.getWindow("Miniplayer").closeWindow();
-          // Closing the miniplayer automatically shows and focuses the mainWindow so we don't need to continue
-          return;
-        }
+  function truncateTrayText(value: string, max: number): string {
+    return value.length > max ? value.slice(0, max - 1) + "…" : value;
+  }
 
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
-        } else {
+  function rebuildTrayMenu() {
+    if (!tray) return;
+
+    const state = playerStateStore.getState();
+    const blockerEnabled = configStore.get("adblocker.blockerEnabled");
+    const blockedCount = Number(memoryStore.get("adblockerBlockedCount") ?? 0);
+    const isPlaying = state.trackState === VideoState.Playing;
+
+    let nowPlayingLabel = "YTM Shield — Idle";
+    let tooltipText = `YTM Shield • ${blockerEnabled ? `Shield On (${blockedCount} blocked)` : "Shield Paused"}`;
+    if (state.videoDetails?.title) {
+      const title = truncateTrayText(state.videoDetails.title, 32);
+      const author = truncateTrayText(state.videoDetails.author || "", 22);
+      const prefix = isPlaying ? "▶" : "⏸";
+      nowPlayingLabel = author ? `${prefix} ${title} — ${author}` : `${prefix} ${title}`;
+      tooltipText = `YTM Shield • ${isPlaying ? "Playing" : "Paused"}: ${state.videoDetails.title}${state.videoDetails.author ? ` — ${state.videoDetails.author}` : ""} (${blockedCount} blocked)`;
+    }
+
+    trayContextMenu = Menu.buildFromTemplate([
+      {
+        label: nowPlayingLabel,
+        type: "normal",
+        enabled: false
+      },
+      {
+        type: "separator"
+      },
+      {
+        label: "Show / Hide Window",
+        type: "normal",
+        click: () => {
+          if (windowManager.hasWindow("Miniplayer")) {
+            windowManager.getWindow("Miniplayer").closeWindow();
+            return;
+          }
+
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.showAndFocus();
+          }
+        }
+      },
+      {
+        label: "Open Miniplayer",
+        type: "normal",
+        click: () => {
+          openOrFocusMiniplayer();
+        }
+      },
+      {
+        type: "separator"
+      },
+      {
+        label: isPlaying ? "Pause" : "Play",
+        type: "normal",
+        click: () => {
+          const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
+          remoteControlApi.postMessage("execute", "playPause");
+        }
+      },
+      {
+        label: "Previous Track",
+        type: "normal",
+        click: () => {
+          const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
+          remoteControlApi.postMessage("execute", "previous");
+        }
+      },
+      {
+        label: "Next Track",
+        type: "normal",
+        click: () => {
+          const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
+          remoteControlApi.postMessage("execute", "next");
+        }
+      },
+      {
+        type: "separator"
+      },
+      {
+        label: blockerEnabled ? `Ad Shield: Active (${blockedCount} blocked)` : "Ad Shield: Paused",
+        type: "checkbox",
+        checked: blockerEnabled,
+        click: () => {
+          configStore.set("adblocker.blockerEnabled", !configStore.get("adblocker.blockerEnabled"));
+        }
+      },
+      {
+        label: "Sleep Timer",
+        type: "submenu",
+        submenu: [
+          {
+            label: "Off",
+            type: "radio",
+            checked: sleepTimerMode === "off",
+            click: () => setSleepTimer(0)
+          },
+          {
+            label: "15 minutes",
+            type: "radio",
+            checked: false,
+            click: () => setSleepTimer(15)
+          },
+          {
+            label: "30 minutes",
+            type: "radio",
+            checked: false,
+            click: () => setSleepTimer(30)
+          },
+          {
+            label: "45 minutes",
+            type: "radio",
+            checked: false,
+            click: () => setSleepTimer(45)
+          },
+          {
+            label: "60 minutes",
+            type: "radio",
+            checked: false,
+            click: () => setSleepTimer(60)
+          },
+          {
+            label: "End of current track",
+            type: "radio",
+            checked: sleepTimerMode === "end_of_track",
+            click: () => setSleepTimer("end_of_track")
+          }
+        ]
+      },
+      {
+        type: "separator"
+      },
+      {
+        label: "Settings",
+        type: "normal",
+        click: () => {
           mainWindow.showAndFocus();
+          openOrFocusSettings();
+        }
+      },
+      {
+        label: "Quit YTM Shield",
+        type: "normal",
+        click: () => {
+          app.quit();
         }
       }
-    },
-    {
-      label: "Play/Pause",
-      type: "normal",
-      click: async () => {
-        const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
-        remoteControlApi.postMessage("execute", "playPause");
-      }
-    },
-    {
-      label: "Previous",
-      type: "normal",
-      click: async () => {
-        const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
-        remoteControlApi.postMessage("execute", "previous");
-      }
-    },
-    {
-      label: "Next",
-      type: "normal",
-      click: async () => {
-        const remoteControlApi = serviceHost.getService(ProtectedAPIManager).createOrGetAPI("RemoteControl");
-        remoteControlApi.postMessage("execute", "next");
-      }
-    },
-    {
-      type: "separator"
-    },
-    {
-      label: "Quit",
-      type: "normal",
-      click: () => {
-        app.quit();
-      }
-    }
-  ]);
-  tray.setToolTip("YTM Shield");
-  tray.setContextMenu(trayContextMenu);
+    ]);
+    tray.setToolTip(tooltipText.slice(0, 127));
+    tray.setContextMenu(trayContextMenu);
+  }
+
+  scheduleTrayRebuild = () => {
+    if (trayRebuildTimer) return;
+    trayRebuildTimer = setTimeout(() => {
+      trayRebuildTimer = null;
+      rebuildTrayMenu();
+    }, 350);
+  };
+
+  tray = new Tray(getTrayIconPath());
+  rebuildTrayMenu();
   tray.on("click", () => {
+    if (windowManager.hasWindow("Miniplayer")) {
+      windowManager.getWindow("Miniplayer").closeWindow();
+      return;
+    }
     mainWindow.showAndFocus();
+  });
+
+  playerStateStore.on("state-changed", () => {
+    scheduleTrayRebuild();
+  });
+  configStore.onDidChange("adblocker.blockerEnabled", () => {
+    scheduleTrayRebuild();
+  });
+  memoryStore.onStateChanged(() => {
+    scheduleTrayRebuild();
   });
 
   nativeTheme.on("updated", setTrayIcon);
@@ -641,9 +953,25 @@ app.on("ready", async () => {
   await integrationManager.runHook(IntegrationManagerHook.AppReady);
 
   // Initially create the YTM view and attach it
+  const bindYtmViewKeyboardShortcuts = (view: AppView) => {
+    view.webContents?.on("before-input-event", (event, input) => {
+      if ((input.control || input.meta) && !input.alt && input.type === "keyDown" && input.key.toLowerCase() === "k") {
+        event.preventDefault();
+        mainWindow.ipcBroadcast("titlebar:toggleCommandPalette");
+      }
+    });
+  };
+
   ytmViewManager.createView();
   const ytmView = ytmViewManager.getView();
-  if (ytmView) mainWindow.attachView(ytmView, 0);
+  if (ytmView) {
+    mainWindow.attachView(ytmView, 0);
+    bindYtmViewKeyboardShortcuts(ytmView);
+  }
+  ytmViewManager.on("view-recreated", () => {
+    const recreated = ytmViewManager.getView();
+    if (recreated) bindYtmViewKeyboardShortcuts(recreated);
+  });
 
   // This hides the main view if it was recreated and the YTMView is in a ready state
   await mainView.on("recreated", async () => {

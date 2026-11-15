@@ -33,6 +33,20 @@ contextBridge.exposeInMainWorld("ytmd", {
   ytmViewReload: () => ipcRenderer.send("ytmView:reload"),
   restartApplicationForUpdate: () => ipcRenderer.send("app:restartApplicationForUpdate"),
 
+  playerStore: {
+    getState: async () => await ipcRenderer.invoke("playerStateStore:getState"),
+    handleStateChanged: (callback: (state: unknown) => void) => {
+      ipcRenderer.on("playerStateStore:stateChanged", (_event, state: unknown) => callback(state));
+    }
+  },
+  executeCommandInYTMView: (command: string, ...args: unknown[]) => ipcRenderer.send("remoteControl:execute", command, ...args),
+  setOverlayOpen: (open: boolean) => ipcRenderer.send("titlebar:setOverlayOpen", open),
+  searchYTM: (query: string) => ipcRenderer.send("ytmView:search", query),
+  setSleepTimer: (option: number | "end_of_track") => ipcRenderer.send("sleepTimer:set", option),
+  onToggleCommandPalette: (callback: () => void) => {
+    ipcRenderer.on("titlebar:toggleCommandPalette", () => callback());
+  },
+
   store: {
     set: (key: string, value: unknown) => store.set(key, value),
     get: async (key: keyof StoreSchema) => await store.get(key),

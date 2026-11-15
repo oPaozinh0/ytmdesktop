@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { safeStorage } from "electron";
-import { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from "fastify";
+import { FastifyReply, FastifyRequest } from "fastify";
 import { AuthToken } from "../../../../shared/integrations/companion-server/types";
 import ConfigStore from "../../../services/configstore";
 
@@ -87,7 +87,7 @@ export async function createAuthTokenAsync(configStore: ConfigStore, appId: stri
   return token;
 }
 
-export async function isAuthValidAsync(configStore: ConfigStore, authToken: string): [boolean, string | null] {
+export async function isAuthValidAsync(configStore: ConfigStore, authToken: string): Promise<[boolean, string | null]> {
   if (!authToken) return [false, null];
 
   const authTokenHash = crypto.createHash("sha256").update(authToken).digest("hex");

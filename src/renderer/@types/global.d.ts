@@ -21,7 +21,17 @@ declare global {
         add(): Promise<{ extension?: UserExtension; error?: string; cancelled?: boolean }>;
         remove(extensionPath: string): Promise<void>;
       };
+      adblocker: {
+        refreshFilters(): Promise<boolean>;
+      };
       openSettingsWindow(initialTab?: number): void;
+      openMiniplayerWindow(): void;
+      openMiniplayer?(): void;
+      setOverlayOpen(open: boolean): void;
+      searchYTM(query: string): void;
+      setSleepTimer(option: number | "end_of_track"): void;
+      onToggleCommandPalette(callback: () => void): void;
+      setCompactMode(compact: boolean): void;
       restartApplication(): void;
       restartApplicationForUpdate(): void;
       getTrueFilePath(file: File): string;
@@ -73,7 +83,7 @@ declare global {
 
       // Miniplayer specific
       playerStore: {
-        getState(): PlayerState | null;
+        getState(): Promise<PlayerState | null>;
         handleStateChanged(callback: (state: PlayerState) => void);
       };
       executeCommandInYTMView(command: string, ...args: unknown[]);

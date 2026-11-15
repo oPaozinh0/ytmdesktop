@@ -94,7 +94,7 @@ export default class AutoUpdater extends EventEmitterService<AutoUpdaterEvents> 
     this.autoUpdaterEnabled = true;
     log.debug(`AutoUpdater enabled with at feed ${this.updateFeedUrl}`);
 
-    if (!!this.updateFeedUrl) {
+    if (this.updateFeedUrl) {
       autoUpdater.setFeedURL({
         url: this.updateFeedUrl
       });

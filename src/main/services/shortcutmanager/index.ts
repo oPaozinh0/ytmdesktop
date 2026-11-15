@@ -3,7 +3,7 @@ import log from "electron-log";
 import Service from "../service";
 import ConfigStore from "../configstore";
 import { MemoryStoreSchema, StoreSchema } from "~shared/store/schema";
-import { DependencyConstructor, Paths } from "~shared/types";
+import { DependencyConstructor } from "~shared/types";
 import MemoryStore from "../memorystore";
 import ProtectedAPIManager from "../protectedapimanager";
 
@@ -107,7 +107,11 @@ export default class ShortcutManager extends Service {
     log.info("Registered shortcuts");
   }
 
-  private tryRegisterShortcut(accelerator: string, remoteControl: string, failFlag: Paths<MemoryStoreSchema>) {
+  private tryRegisterShortcut(
+    accelerator: string,
+    remoteControl: string,
+    failFlag: { [K in keyof MemoryStoreSchema]: boolean extends MemoryStoreSchema[K] ? K : never }[keyof MemoryStoreSchema]
+  ) {
     const memoryStore = this.getDependency(MemoryStore<MemoryStoreSchema>);
     const protectedApiManager = this.getDependency(ProtectedAPIManager);
 

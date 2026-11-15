@@ -5,7 +5,6 @@ import { DependencyConstructor } from "~shared/types";
 import ProtectedAPIManager, { ProtectedAPI } from "../protectedapimanager";
 import AppWindowManager from "../windowmanager";
 import StateManager from "../statemanager";
-import assert from "node:assert";
 
 enum YTMVideoState {
   Unstarted = -1,

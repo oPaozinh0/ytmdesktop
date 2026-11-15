@@ -43,6 +43,10 @@ contextBridge.exposeInMainWorld("ytmd", {
     add: async () => await ipcRenderer.invoke("extensions:add"),
     remove: async (extensionPath: string) => await ipcRenderer.invoke("extensions:remove", extensionPath)
   },
+  adblocker: {
+    refreshFilters: async (): Promise<boolean> => await ipcRenderer.invoke("adblocker:refreshFilters")
+  },
+  setSleepTimer: (option: number | "end_of_track") => ipcRenderer.send("sleepTimer:set", option),
   restartApplication: () => ipcRenderer.send("app:relaunch"),
   restartApplicationForUpdate: () => ipcRenderer.send("app:restartApplicationForUpdate"),
   getAppVersion: async (): Promise<string> => await ipcRenderer.invoke("app:getVersion"),

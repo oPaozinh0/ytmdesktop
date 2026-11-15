@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef } from "vue";
 import { LikeStatus, PlayerState, RepeatMode, Thumbnail, VideoState } from "~shared/playerstatestore/types";
+import { SleepTimerMode } from "~shared/store/schema";
 import RangeInput from "../../components/RangeInput.vue";
 import ShieldLogo from "../../components/ShieldLogo.vue";
 
@@ -12,6 +13,53 @@ const videoProgress = ref(0);
 const videoLength = ref(0);
 const videoId = ref("");
 const thumbnailUrl = ref<string>("");
+
+const compactMode = ref(false);
+const activePanel = ref<"none" | "queue" | "info">("none");
+const sleepTimerMode = ref<SleepTimerMode>("off");
+const blockedCount = ref(0);
+const accentColor = ref("#ff2e4c");
+const accentRgb = ref("255, 46, 76");
+
+function hexToRgb(hex: string): string {
+  const cleaned = (hex || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    const r = parseInt(cleaned.slice(0, 2), 16);
+    const g = parseInt(cleaned.slice(2, 4), 16);
+    const b = parseInt(cleaned.slice(4, 6), 16);
+    return `${r}, ${g}, ${b}`;
+  }
+  return "255, 46, 76";
+}
+
+const miniplayerStyleVars = computed(() => ({
+  "--accent-primary": accentColor.value,
+  "--accent-hover": accentColor.value,
+  "--accent-soft": `rgba(${accentRgb.value}, 0.16)`
+}));
+
+function togglePanel(panel: "queue" | "info") {
+  activePanel.value = activePanel.value === panel ? "none" : panel;
+}
+
+const queueItems = computed(() => {
+  const items = state.value?.queue?.items ?? [];
+  return items
+    .map((item, idx) => (item ? { ...item, index: idx } : null))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+});
+
+function playQueueIndex(index: number) {
+  window.ytmd.executeCommandInYTMView("playQueueIndex", index);
+}
+
+function removeQueueIndex(index: number) {
+  window.ytmd.executeCommandInYTMView("queueRemove", index);
+}
+
+function selectSleepTimer(option: number | "end_of_track") {
+  window.ytmd.setSleepTimer(option);
+}
 
 const seekbarContainer = useTemplateRef("seekbarContainer");
 const infoContainer = useTemplateRef("infoContainer");
@@ -67,10 +115,40 @@ function reconcileMarquee() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.ytmd.playerStore.handleStateChanged(newState => {
     stateChanged(newState);
   });
+
+  const mem = window.ytmd.memoryStore;
+  if (mem) {
+    compactMode.value = (await mem.get("miniplayerCompactMode")) ?? false;
+    sleepTimerMode.value = (await mem.get("sleepTimerMode")) ?? "off";
+    blockedCount.value = (await mem.get("adblockerBlockedCount")) ?? 0;
+    mem.onStateChanged(newState => {
+      if (typeof newState.miniplayerCompactMode === "boolean") {
+        compactMode.value = newState.miniplayerCompactMode;
+        if (compactMode.value) activePanel.value = "none";
+      }
+      if (newState.sleepTimerMode) sleepTimerMode.value = newState.sleepTimerMode;
+      if (typeof newState.adblockerBlockedCount === "number") blockedCount.value = newState.adblockerBlockedCount;
+    });
+  }
+
+  const store = window.ytmd.store;
+  if (store) {
+    const appearance = await store.get("appearance");
+    if (appearance?.accentColor) {
+      accentColor.value = appearance.accentColor;
+      accentRgb.value = hexToRgb(appearance.accentColor);
+    }
+    store.onDidAnyChange(newState => {
+      if (newState.appearance?.accentColor) {
+        accentColor.value = newState.appearance.accentColor;
+        accentRgb.value = hexToRgb(newState.appearance.accentColor);
+      }
+    });
+  }
 
   window.ytmd.requestWindowState();
   stateChanged(state.value);
@@ -183,77 +261,287 @@ window.addEventListener("resize", reconcileMarquee);
 </script>
 
 <template>
-  <div class="container">
+  <div
+    class="container"
+    :class="{ compact: compactMode }"
+    :style="miniplayerStyleVars"
+  >
     <div
       class="bg-art"
       :style="hasActiveTrack && thumbnailUrl ? { backgroundImage: `url('${thumbnailUrl}')` } : {}"
     />
     <div class="bg-scrim" />
 
-    <div class="artwork-stage">
-      <div
-        v-if="hasActiveTrack && thumbnailUrl"
-        class="cover-frame"
-      >
+    <div
+      v-if="compactMode"
+      class="compact-bar"
+    >
+      <div class="compact-track">
         <img
+          v-if="hasActiveTrack && thumbnailUrl"
           :src="thumbnailUrl"
-          alt="Album cover"
-          class="cover-image"
+          alt="Cover"
+          class="compact-thumb"
           draggable="false"
         >
-      </div>
-      <div
-        v-else-if="!hasActiveTrack"
-        class="idle-stage"
-      >
-        <ShieldLogo
-          :size="44"
-          glow
-        />
-        <p class="idle-title">
-          No music playing
-        </p>
-        <div class="idle-actions">
-          <button
-            class="idle-btn primary"
-            @click="playPauseVideo"
-          >
-            <span class="material-symbols-outlined">play_arrow</span>
-            Play Music
-          </button>
-          <button
-            class="idle-btn secondary"
-            @click="closeMiniplayer"
-          >
-            <span class="material-symbols-outlined">pip_exit</span>
-            Back to App
-          </button>
+        <div
+          v-else
+          class="compact-thumb placeholder"
+        >
+          <ShieldLogo :size="18" />
         </div>
+        <div class="compact-meta">
+          <span class="compact-title">{{ hasActiveTrack ? state!.videoDetails!.title : "No track playing" }}</span>
+          <span class="compact-artist">{{ hasActiveTrack ? state!.videoDetails!.author : "Click Play to listen" }}</span>
+        </div>
+      </div>
+
+      <div class="compact-controls">
+        <button
+          class="ctrl-btn"
+          title="Previous"
+          @click="previousVideo"
+        >
+          <span class="icon material-symbols-outlined">skip_previous</span>
+        </button>
+        <button
+          class="play-pause-btn compact-pp"
+          title="Play / Pause"
+          @click="playPauseVideo"
+        >
+          <span
+            v-if="!hasActiveTrack || state?.trackState === VideoState.Paused || state?.trackState === VideoState.Unknown"
+            class="icon material-symbols-outlined"
+          >play_arrow</span>
+          <span
+            v-else-if="state?.trackState === VideoState.Playing"
+            class="icon material-symbols-outlined"
+          >pause</span>
+          <span
+            v-else
+            class="icon material-symbols-outlined spinning"
+          >progress_activity</span>
+        </button>
+        <button
+          class="ctrl-btn"
+          title="Next"
+          @click="nextVideo"
+        >
+          <span class="icon material-symbols-outlined">skip_next</span>
+        </button>
+      </div>
+
+      <div class="compact-progress-track">
+        <div
+          class="compact-progress-fill"
+          :style="{ width: `${hasActiveTrack ? progressPercent : 0}%` }"
+        />
       </div>
     </div>
 
-    <div class="glass-dock">
-      <div class="track-header">
-        <div class="track-meta">
-          <div
-            ref="infoContainer"
-            class="video-info"
+    <template v-else>
+      <div
+        v-if="activePanel !== 'none'"
+        class="drawer-overlay"
+      >
+        <div class="drawer-header">
+          <span class="drawer-title">
+            {{ activePanel === "queue" ? `Queue (${queueItems.length})` : "Track Info & Sleep Timer" }}
+          </span>
+          <button
+            class="ctrl-btn"
+            title="Close panel"
+            @click="activePanel = 'none'"
           >
-            <span
-              ref="infoTitle"
-              class="title"
-            >{{ hasActiveTrack ? state!.videoDetails!.title : "No track selected" }}</span>
-          </div>
-          <span class="artist">{{ hasActiveTrack ? state!.videoDetails!.author : "Click Play to start listening" }}</span>
+            <span class="icon material-symbols-outlined">close</span>
+          </button>
         </div>
-        <button
-          class="ctrl-btn dock-exit-btn"
-          title="Return to main player"
-          @click="closeMiniplayer"
+
+        <div
+          v-if="activePanel === 'queue'"
+          class="drawer-body queue-list"
         >
-          <span class="icon material-symbols-outlined">pip_exit</span>
-        </button>
+          <div
+            v-if="queueItems.length === 0"
+            class="drawer-empty"
+          >
+            Queue is empty
+          </div>
+          <div
+            v-for="item in queueItems"
+            :key="`${item.videoId}-${item.index}`"
+            class="queue-row"
+            :class="{ selected: item.selected }"
+          >
+            <button
+              class="queue-row-main"
+              @click="playQueueIndex(item.index)"
+            >
+              <span class="material-symbols-outlined queue-state-icon">
+                {{ item.selected ? "graphic_eq" : "music_note" }}
+              </span>
+              <div class="queue-row-meta">
+                <span class="queue-row-title">{{ item.title }}</span>
+                <span class="queue-row-author">{{ item.author }}</span>
+              </div>
+              <span class="queue-row-dur">{{ item.duration }}</span>
+            </button>
+            <button
+              class="queue-remove-btn"
+              title="Remove from queue"
+              @click.stop="removeQueueIndex(item.index)"
+            >
+              <span class="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="drawer-body info-panel"
+        >
+          <div class="info-card">
+            <div class="info-row">
+              <span class="info-key">Track</span>
+              <span class="info-val">{{ state?.videoDetails?.title || "Idle" }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Artist</span>
+              <span class="info-val">{{ state?.videoDetails?.author || "—" }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Album</span>
+              <span class="info-val">{{ state?.videoDetails?.album || "Single / Unknown" }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Shield Blocked</span>
+              <span class="info-val">{{ blockedCount }} this session</span>
+            </div>
+          </div>
+
+          <p class="drawer-subtitle">
+            Sleep Timer ({{ sleepTimerMode === "off" ? "Off" : sleepTimerMode === "end_of_track" ? "End of track" : "Active" }})
+          </p>
+          <div class="sleep-chip-grid">
+            <button
+              class="sleep-chip"
+              @click="selectSleepTimer(15)"
+            >
+              15m
+            </button>
+            <button
+              class="sleep-chip"
+              @click="selectSleepTimer(30)"
+            >
+              30m
+            </button>
+            <button
+              class="sleep-chip"
+              @click="selectSleepTimer(60)"
+            >
+              60m
+            </button>
+            <button
+              class="sleep-chip"
+              @click="selectSleepTimer('end_of_track')"
+            >
+              End track
+            </button>
+            <button
+              class="sleep-chip"
+              @click="selectSleepTimer(0)"
+            >
+              Off
+            </button>
+          </div>
+        </div>
       </div>
+
+      <div
+        v-else
+        class="artwork-stage"
+      >
+        <div
+          v-if="hasActiveTrack && thumbnailUrl"
+          class="cover-frame"
+        >
+          <img
+            :src="thumbnailUrl"
+            alt="Album cover"
+            class="cover-image"
+            draggable="false"
+          >
+        </div>
+        <div
+          v-else-if="!hasActiveTrack"
+          class="idle-stage"
+        >
+          <ShieldLogo
+            :size="44"
+            glow
+          />
+          <p class="idle-title">
+            No music playing
+          </p>
+          <div class="idle-actions">
+            <button
+              class="idle-btn primary"
+              @click="playPauseVideo"
+            >
+              <span class="material-symbols-outlined">play_arrow</span>
+              Play Music
+            </button>
+            <button
+              class="idle-btn secondary"
+              @click="closeMiniplayer"
+            >
+              <span class="material-symbols-outlined">pip_exit</span>
+              Back to App
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-dock">
+        <div class="track-header">
+          <div class="track-meta">
+            <div
+              ref="infoContainer"
+              class="video-info"
+            >
+              <span
+                ref="infoTitle"
+                class="title"
+              >{{ hasActiveTrack ? state!.videoDetails!.title : "No track selected" }}</span>
+            </div>
+            <span class="artist">{{ hasActiveTrack ? state!.videoDetails!.author : "Click Play to start listening" }}</span>
+          </div>
+          <div class="dock-header-actions">
+            <button
+              class="ctrl-btn"
+              :class="{ active: activePanel === 'queue' }"
+              title="Queue Drawer"
+              @click="togglePanel('queue')"
+            >
+              <span class="icon material-symbols-outlined">queue_music</span>
+            </button>
+            <button
+              class="ctrl-btn"
+              :class="{ active: activePanel === 'info' || sleepTimerMode !== 'off' }"
+              title="Track Info & Sleep Timer"
+              @click="togglePanel('info')"
+            >
+              <span class="icon material-symbols-outlined">{{ sleepTimerMode !== "off" ? "bedtime" : "info" }}</span>
+            </button>
+            <button
+              class="ctrl-btn dock-exit-btn"
+              title="Return to main player"
+              @click="closeMiniplayer"
+            >
+              <span class="icon material-symbols-outlined">pip_exit</span>
+            </button>
+          </div>
+        </div>
 
       <div class="seek-row">
         <span class="time-label">{{ hasActiveTrack ? formatTime(videoProgress) : "0:00" }}</span>
@@ -394,6 +682,7 @@ window.addEventListener("resize", reconcileMarquee);
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -781,5 +1070,309 @@ window.addEventListener("resize", reconcileMarquee);
   .hide-compact {
     display: none;
   }
+}
+
+.container.compact {
+  padding: 0 10px 6px;
+  justify-content: flex-end;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.compact-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(14, 15, 22, 0.78);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.compact-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.compact-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.compact-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compact-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-artist {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.compact-controls button {
+  -webkit-app-region: no-drag;
+}
+
+.compact-pp {
+  width: 30px;
+  height: 30px;
+}
+
+.compact-progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.compact-progress-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.25s linear;
+}
+
+.dock-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.drawer-overlay {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: rgba(14, 15, 22, 0.86);
+  backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.drawer-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.drawer-empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.queue-row.selected {
+  background: var(--accent-soft);
+}
+
+.queue-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.queue-state-icon {
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.queue-row.selected .queue-state-icon {
+  color: var(--accent-primary);
+}
+
+.queue-row-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-row-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-row-author {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-row-dur {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-remove-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.queue-remove-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.queue-remove-btn .material-symbols-outlined {
+  font-size: 15px;
+}
+
+.info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.info-key {
+  color: var(--text-muted);
+}
+
+.info-val {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawer-subtitle {
+  margin: 4px 2px 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.sleep-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sleep-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sleep-chip:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
 }
 </style>

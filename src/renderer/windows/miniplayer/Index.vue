@@ -4,7 +4,20 @@ import Miniplayer from "./Miniplayer.vue";
 import ShieldLogo from "../../components/ShieldLogo.vue";
 
 const isWayland = ref(window.ytmd.isWayland());
+const compactMode = ref(false);
 const alwaysOnTop = ref(true);
+
+function toggleCompactMode() {
+  const next = !compactMode.value;
+  compactMode.value = next;
+  window.ytmd.setCompactMode(next);
+}
+
+window.ytmd.memoryStore?.onStateChanged?.(newState => {
+  if (typeof newState.miniplayerCompactMode === "boolean") {
+    compactMode.value = newState.miniplayerCompactMode;
+  }
+});
 
 window.ytmd.handleWindowEvents(windowState => {
   alwaysOnTop.value = windowState.alwaysOnTop;
@@ -20,13 +33,26 @@ function pinUnpinMiniplayer() {
 </script>
 
 <template>
-  <div class="miniplayer-root">
+  <div
+    class="miniplayer-root"
+    :class="{ 'is-compact': compactMode }"
+  >
     <div class="topbar">
       <div class="topbar-brand">
         <ShieldLogo :size="15" />
         <span>YTM Shield</span>
       </div>
       <div class="button-container">
+        <button
+          class="top-btn"
+          :class="{ pinned: compactMode }"
+          :title="compactMode ? 'Expand Miniplayer' : 'Compact Horizontal Bar'"
+          @click="toggleCompactMode"
+        >
+          <span class="icon material-symbols-outlined">
+            {{ compactMode ? "open_in_full" : "view_stream" }}
+          </span>
+        </button>
         <button
           class="top-btn pin"
           :class="{ pinned: alwaysOnTop }"
@@ -74,6 +100,22 @@ function pinUnpinMiniplayer() {
   z-index: 20;
   background: linear-gradient(180deg, rgba(11, 12, 16, 0.72) 0%, rgba(11, 12, 16, 0) 100%);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.miniplayer-root.is-compact .topbar {
+  height: 28px;
+  padding: 2px 6px 0 8px;
+}
+
+.miniplayer-root.is-compact .top-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.miniplayer-root.is-compact .top-btn .icon {
+  font-size: 14px;
 }
 
 .topbar-brand {

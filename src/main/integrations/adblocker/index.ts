@@ -2,7 +2,7 @@ import { app, ipcMain, Session } from "electron";
 import path from "path";
 import fs from "fs/promises";
 import log from "electron-log";
-import { ElectronBlocker } from "@ghostery/adblocker-electron";
+import { ElectronBlocker, fromElectronDetails } from "@ghostery/adblocker-electron";
 import type { IBackgroundCallback } from "@ghostery/adblocker-electron-preload";
 import { parse } from "tldts-experimental";
 
@@ -10,7 +10,7 @@ import Integration from "../integration";
 import ConfigStore from "../../services/configstore";
 import MemoryStore from "../../services/memorystore";
 import YTMViewManager from "../../services/ytmviewmanager";
-import { AdblockerFilterSet, MemoryStoreSchema } from "../../../shared/store/schema";
+import { AdblockerFilterSet, BlockedRequestEntry, MemoryStoreSchema } from "../../../shared/store/schema";
 
 // These are the ipc channels the adblocker preload script talks to. They're defined by
 // @ghostery/adblocker-electron and must match exactly.
@@ -32,18 +32,29 @@ export default class Adblocker extends Integration {
   public override dependentStoreProperties: Integration["dependentStoreProperties"] = [
     "adblocker.filterSet",
     "adblocker.cosmeticFilteringEnabled",
-    "adblocker.scriptletsEnabled"
+    "adblocker.scriptletsEnabled",
+    "adblocker.customRules"
   ];
 
   private blocker: ElectronBlocker | null = null;
   private blockerFilterSet: AdblockerFilterSet | null = null;
   private blockerCosmeticFiltering = false;
   private scriptletsEnabled = false;
+  private lastCustomRules: string | null = null;
   private preloadScriptId: string | null = null;
   private attached = false;
   private blockedCount = 0;
+  private pendingLifetimeDelta = 0;
+  private flushTimer: NodeJS.Timeout | null = null;
+  private recentBlocked: BlockedRequestEntry[] = [];
 
-  public override onSetup(): void {}
+  public override onSetup(): void {
+    ipcMain.removeHandler("adblocker:refreshFilters");
+    ipcMain.handle("adblocker:refreshFilters", () => this.forceRefresh());
+    app.on("will-quit", () => {
+      this.flushLifetimeStats();
+    });
+  }
 
   public override async onEnabled(): Promise<void> {
     await this.initialize();
@@ -54,11 +65,78 @@ export default class Adblocker extends Integration {
     const memoryStore = this.getService(MemoryStore<MemoryStoreSchema>);
     const ytmViewManager = this.getService(YTMViewManager);
 
+    this.flushLifetimeStats();
     this.detach(ytmViewManager.getSession(), memoryStore);
 
     const ytmView = ytmViewManager.getView();
     if (ytmView?.webContents && !ytmView.webContents.isDestroyed() && !configStore.get("adblocker.blockerEnabled")) {
       ytmView.webContents.reload();
+    }
+  }
+
+  public async forceRefresh(): Promise<boolean> {
+    const configStore = this.getService(ConfigStore);
+    const memoryStore = this.getService(MemoryStore<MemoryStoreSchema>);
+    memoryStore.set("adblockerRefreshing", true);
+
+    try {
+      const filterSet = configStore.get("adblocker.filterSet");
+      const cachePath = path.join(app.getPath("userData"), "adblocker", `engine-${filterSet}.bin`);
+      await fs.rm(cachePath, { force: true });
+
+      this.blocker = null;
+      this.blockerFilterSet = null;
+      this.lastCustomRules = null;
+
+      if (this.isEnabled) {
+        await this.initialize();
+      } else {
+        await this.buildEngine(filterSet, configStore.get("adblocker.customRules") ?? "");
+      }
+
+      return true;
+    } catch (error) {
+      log.error("Adblocker manual refresh failed", error);
+      return false;
+    } finally {
+      memoryStore.set("adblockerRefreshing", false);
+    }
+  }
+
+  private flushLifetimeStats(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.pendingLifetimeDelta <= 0) return;
+
+    const configStore = this.getService(ConfigStore);
+    const current = configStore.get("adblocker.totalBlockedLifetime") ?? 0;
+    configStore.set("adblocker.totalBlockedLifetime", current + this.pendingLifetimeDelta);
+    this.pendingLifetimeDelta = 0;
+  }
+
+  private recordBlockedRequest(memoryStore: MemoryStore<MemoryStoreSchema>, details: Electron.OnBeforeRequestListenerDetails, filter?: string): void {
+    this.blockedCount++;
+    this.pendingLifetimeDelta++;
+
+    this.recentBlocked.unshift({
+      url: details.url,
+      resourceType: details.resourceType,
+      filter,
+      timestamp: Date.now()
+    });
+    if (this.recentBlocked.length > 30) {
+      this.recentBlocked.length = 30;
+    }
+
+    memoryStore.set("adblockerBlockedCount", this.blockedCount);
+    memoryStore.set("adblockerRecentBlocked", [...this.recentBlocked]);
+
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => {
+        this.flushLifetimeStats();
+      }, 5000);
     }
   }
 
@@ -73,12 +151,14 @@ export default class Adblocker extends Integration {
 
     const settings = configStore.get("adblocker");
     const filterSet = settings.filterSet;
+    const customRules = settings.customRules ?? "";
 
     if (
       this.attached &&
       this.blockerFilterSet === filterSet &&
       this.blockerCosmeticFiltering === settings.cosmeticFilteringEnabled &&
-      this.scriptletsEnabled === settings.scriptletsEnabled
+      this.scriptletsEnabled === settings.scriptletsEnabled &&
+      this.lastCustomRules === customRules
     ) {
       return;
     }
@@ -90,10 +170,11 @@ export default class Adblocker extends Integration {
 
     memoryStore.set("adblockerFailed", false);
 
-    if (!this.blocker || this.blockerFilterSet !== filterSet) {
+    if (!this.blocker || this.blockerFilterSet !== filterSet || this.lastCustomRules !== customRules) {
       try {
-        this.blocker = await this.buildEngine(filterSet);
+        this.blocker = await this.buildEngine(filterSet, customRules);
         this.blockerFilterSet = filterSet;
+        this.lastCustomRules = customRules;
       } catch (error) {
         log.error("Adblocker engine could not be built", error);
         memoryStore.set("adblockerFailed", true);
@@ -116,6 +197,8 @@ export default class Adblocker extends Integration {
   private detach(ytmSession: Session, memoryStore: MemoryStore<MemoryStoreSchema>): void {
     if (!this.attached) return;
     this.attached = false;
+
+    this.flushLifetimeStats();
 
     ytmSession.webRequest.onBeforeRequest(null);
     ytmSession.webRequest.onHeadersReceived(null);
@@ -200,7 +283,18 @@ export default class Adblocker extends Integration {
     }
   };
 
-  private async buildEngine(filterSet: AdblockerFilterSet): Promise<ElectronBlocker> {
+  private applyCustomRules(blocker: ElectronBlocker, customRules: string): void {
+    const customLines = customRules
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !line.startsWith("!") && !line.startsWith("["));
+    if (customLines.length > 0) {
+      blocker.updateFromDiff({ added: customLines });
+    }
+  }
+
+  private async buildEngine(filterSet: AdblockerFilterSet, customRules = ""): Promise<ElectronBlocker> {
+    const configStore = this.getService(ConfigStore);
     const cacheDirectory = path.join(app.getPath("userData"), "adblocker");
     await fs.mkdir(cacheDirectory, { recursive: true });
 
@@ -208,10 +302,13 @@ export default class Adblocker extends Integration {
 
     // The library reads its cache unconditionally and only fetches when reading fails, so stale
     // caches have to be dropped by hand or the filter lists would never be updated again
-    const cacheStats = await fs.stat(cachePath).catch((): null => null);
+    let cacheStats = await fs.stat(cachePath).catch((): null => null);
+    let cacheDropped = false;
     if (cacheStats && Date.now() - cacheStats.mtimeMs > cacheMaxAge) {
       log.info("Adblocker filter lists are out of date, refreshing");
       await fs.rm(cachePath, { force: true });
+      cacheStats = null;
+      cacheDropped = true;
     }
 
     const caching = {
@@ -228,6 +325,12 @@ export default class Adblocker extends Integration {
 
     try {
       const blocker = (await fromPrebuilt.call(ElectronBlocker, fetch, caching)) as ElectronBlocker;
+      if (!cacheStats || cacheDropped) {
+        configStore.set("adblocker.lastFilterUpdateAt", Date.now());
+      } else if (!configStore.get("adblocker.lastFilterUpdateAt")) {
+        configStore.set("adblocker.lastFilterUpdateAt", Math.floor(cacheStats.mtimeMs));
+      }
+      this.applyCustomRules(blocker, customRules);
       log.info(`Adblocker engine loaded (filter set ${filterSet})`);
       return blocker;
     } catch (error) {
@@ -238,6 +341,7 @@ export default class Adblocker extends Integration {
       if (!cached) throw error;
 
       const blocker = ElectronBlocker.deserialize(cached) as ElectronBlocker;
+      this.applyCustomRules(blocker, customRules);
       log.info("Adblocker engine loaded from cache");
       return blocker;
     }
@@ -250,8 +354,14 @@ export default class Adblocker extends Integration {
     ytmSession.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
       blocker.onBeforeRequest(details, response => {
         if (response.cancel || response.redirectURL) {
-          this.blockedCount++;
-          memoryStore.set("adblockerBlockedCount", this.blockedCount);
+          let filter: string | undefined;
+          try {
+            const matched = blocker.match(fromElectronDetails(details));
+            filter = matched.filter?.toString() ?? (response.redirectURL ? "redirect-rule" : undefined);
+          } catch {
+            filter = undefined;
+          }
+          this.recordBlockedRequest(memoryStore, details, filter);
         }
         callback(response);
       });

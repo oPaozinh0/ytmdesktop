@@ -9,7 +9,16 @@ export default class MemoryStore<T extends Record<string, unknown>> extends Serv
   public static override readonly dependencies: DependencyConstructor<Service>[] = [AppWindowManager];
 
   private state: Record<string, unknown> = {
-    settingsInitialTab: null
+    settingsInitialTab: null,
+    adblockerReady: false,
+    adblockerFailed: false,
+    adblockerBlockedCount: 0,
+    adblockerRecentBlocked: [],
+    adblockerRefreshing: false,
+    sleepTimerEndTime: null,
+    sleepTimerMode: "off",
+    sponsorBlockLastSkipped: null,
+    miniplayerCompactMode: false
   };
   private eventEmitter = new EventEmitter();
 

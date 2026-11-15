@@ -30,6 +30,28 @@ export type ExtensionLoadError = {
   message: string;
 };
 
+export type BlockedRequestEntry = {
+  url: string;
+  resourceType: string;
+  filter?: string;
+  timestamp: number;
+};
+
+export type SponsorBlockSegment = {
+  UUID: string;
+  segment: [number, number];
+  category: string;
+  actionType: string;
+  videoDuration?: number;
+};
+
+export type SleepTimerMode = "off" | "timed" | "end_of_track";
+
+export type SponsorBlockSkipNotice = {
+  category: string;
+  skippedAt: number;
+};
+
 export type StoreSchema = {
   metadata: {
     version: 1;
@@ -46,6 +68,10 @@ export type StoreSchema = {
     alwaysShowVolumeSlider: boolean;
     customCSSEnabled: boolean;
     customCSSPath: string | null;
+    inlineCustomCSS: string;
+    glassThemeEnabled: boolean;
+    ambientGlowEnabled: boolean;
+    accentColor: string;
     zoom: number;
     trayIconStyle: TrayIconStyle;
   };
@@ -55,6 +81,10 @@ export type StoreSchema = {
     enableSpeakerFill: boolean;
     progressInTaskbar: boolean;
     ratioVolume: boolean;
+    equalizerEnabled: boolean;
+    equalizerPreset: string;
+    equalizerBands: number[];
+    loudnessNormalization: boolean;
   };
   integrations: {
     companionServerEnabled: boolean;
@@ -71,6 +101,11 @@ export type StoreSchema = {
     scriptletsEnabled: boolean;
     extensionsEnabled: boolean;
     extensions: UserExtension[];
+    totalBlockedLifetime: number;
+    lastFilterUpdateAt: number | null;
+    customRules: string;
+    sponsorBlockEnabled: boolean;
+    sponsorBlockCategories: string[];
   };
   shortcuts: {
     playPause: string;
@@ -142,6 +177,12 @@ export type MemoryStoreSchema = {
   adblockerReady: boolean;
   adblockerFailed: boolean;
   adblockerBlockedCount: number;
+  adblockerRecentBlocked: BlockedRequestEntry[];
+  adblockerRefreshing: boolean;
+  sleepTimerEndTime: number | null;
+  sleepTimerMode: SleepTimerMode;
+  sponsorBlockLastSkipped: SponsorBlockSkipNotice | null;
+  miniplayerCompactMode: boolean;
   extensionsLoaded: LoadedExtension[];
   extensionsLoadErrors: ExtensionLoadError[];
 };

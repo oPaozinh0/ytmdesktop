@@ -195,9 +195,10 @@ export async function createAdditionalPlayerBarControls() {
     }
   });
 
-  const rightControls = document
-    ?.querySelector("ytmusic-app-layout>ytmusic-player-bar")
-    ?.querySelector(".right-controls-buttons");
+  const rightControls = document.querySelector(
+    "ytmusic-app-layout > ytmusic-player-bar .right-controls-buttons, ytmusic-player-bar .right-controls-buttons, #right-controls .right-controls-buttons",
+  );
+  if (!rightControls) return;
   const sleepTimerButton = document.createElement("yt-icon-button");
 
   const sleepTimerIcon = document.createElement("yt-icon") as any;
@@ -339,6 +340,25 @@ export async function createAdditionalPlayerBarControls() {
                           },
                         },
                       },
+                      {
+                        menuServiceItemRenderer: {
+                          icon: {
+                            iconType: "CLOCK",
+                          },
+                          serviceEndpoint: {
+                            ytmdSleepTimerServiceEndpoint: {
+                              time: "end_of_track",
+                            },
+                          },
+                          text: {
+                            runs: [
+                              {
+                                text: "End of current track",
+                              },
+                            ],
+                          },
+                        },
+                      },
                       sleepTimerTimeout !== null
                         ? {
                             menuServiceItemRenderer: {
@@ -374,21 +394,29 @@ export async function createAdditionalPlayerBarControls() {
       }),
     );
   };
-  rightControls
-    ?.querySelector(".shuffle")
-    ?.insertAdjacentElement("afterend", sleepTimerButton);
+  const shuffleControl = rightControls.querySelector(".shuffle");
+  if (shuffleControl) {
+    shuffleControl.insertAdjacentElement("afterend", sleepTimerButton);
+  } else {
+    rightControls.prepend(sleepTimerButton);
+  }
 
-  const humanizeTime = (time) => {
-    // This is just a hacked together function to provide a humanization for the sleep timer. It serves no purpose outside that and isn't some complicated humanizer
-    if (time === 1) return `${time} minute`;
-    if (time > 1 && time < 60) return `${time} minutes`;
-    if (time >= 60 && time < 120) return `${time / 60} hour`;
-    if (time >= 120) return `${time / 60} hours`;
+  const humanizeTime = (time: number | string) => {
+    if (time === "end_of_track") return "end of current track";
+    const mins = Number(time);
+    if (mins === 1) return `${mins} minute`;
+    if (mins > 1 && mins < 60) return `${mins} minutes`;
+    if (mins >= 60 && mins < 120) return `${mins / 60} hour`;
+    if (mins >= 120) return `${mins / 60} hours`;
+    return "";
   };
 
   window.addEventListener("yt-action", (e: any) => {
     if (e.detail.actionName === "yt-service-request") {
       if (e.detail.args[1].ytmdSleepTimerServiceEndpoint) {
+        const option = e.detail.args[1].ytmdSleepTimerServiceEndpoint.time;
+        window.postMessage({ type: "ytmd-sleep-timer-set", option }, "*");
+
         if (sleepTimerTimeout !== null) {
           clearTimeout(sleepTimerTimeout);
           sleepTimerTimeout = null;
@@ -398,7 +426,38 @@ export async function createAdditionalPlayerBarControls() {
           }
         }
 
-        if (e.detail.args[1].ytmdSleepTimerServiceEndpoint.time > 0) {
+        if (option === "end_of_track") {
+          sleepTimerButton.classList.add("active");
+          sleepTimerButton.setAttribute("title", "Sleep timer: End of current track");
+          document.body.dispatchEvent(
+            new CustomEvent("yt-action", {
+              bubbles: true,
+              cancelable: false,
+              composed: true,
+              detail: {
+                actionName: "yt-open-popup-action",
+                args: [
+                  {
+                    openPopupAction: {
+                      popup: {
+                        notificationActionRenderer: {
+                          responseText: {
+                            runs: [{ text: "Sleep timer set to end of current track" }]
+                          }
+                        }
+                      },
+                      popupType: "TOAST",
+                      uniqueId: crypto.randomUUID()
+                    }
+                  },
+                  document.querySelector("ytmusic-app")
+                ],
+                optionalAction: false,
+                returnValue: []
+              }
+            })
+          );
+        } else if (option > 0) {
           if (!sleepTimerButton.classList.contains("active")) {
             sleepTimerButton.classList.add("active");
             sleepTimerButton.setAttribute(
@@ -876,9 +935,11 @@ export async function addTimedLyrics() {
         }
       }
 
+      if (lyricsTab === -1) return;
       const lyricBrowseId =
-        state.playerPage.playerPageTabs[lyricsTab].tabRenderer.endpoint
-          .browseEndpoint.browseId;
+        state.playerPage.playerPageTabs[lyricsTab]?.tabRenderer?.endpoint
+          ?.browseEndpoint?.browseId;
+      if (!lyricBrowseId) return;
       if (currentLyricBrowseId !== lyricBrowseId) {
         currentLyricBrowseId = lyricBrowseId;
         enableAutoScroll();
@@ -919,4 +980,226 @@ export async function addTimedLyrics() {
   playerApi.addEventListener("onVideoProgress", (progress) => {
     updateLyricLines(progress);
   });
+}
+
+const EQ_FREQUENCIES = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+type AudioChainState = {
+  ctx: AudioContext;
+  filters: BiquadFilterNode[];
+  compressor: DynamicsCompressorNode;
+  makeupGain: GainNode;
+};
+
+type SbSegment = {
+  UUID: string;
+  segment: [number, number];
+  category: string;
+  actionType?: string;
+};
+
+export function initAudioEngineAndSponsorBlock() {
+  const playerApi = ytmhook.ytmPlayerController.playerApi;
+
+  let equalizerEnabled = false;
+  let equalizerBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let loudnessNormalization = false;
+  let sponsorBlockEnabled = false;
+  let sponsorBlockCategories = ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"];
+
+  const attachedElements = new WeakMap<HTMLMediaElement, AudioChainState>();
+  let activeChain: AudioChainState | null = null;
+
+  let currentSbVideoId: string | null = null;
+  let currentSbSegments: SbSegment[] = [];
+  const skippedUuids = new Set<string>();
+
+  function applyAudioParams(chain: AudioChainState) {
+    for (let i = 0; i < chain.filters.length; i++) {
+      const targetGain = equalizerEnabled ? Math.max(-12, Math.min(12, Number(equalizerBands[i] ?? 0))) : 0;
+      chain.filters[i].gain.value = Number.isFinite(targetGain) ? targetGain : 0;
+    }
+
+    if (loudnessNormalization) {
+      chain.compressor.threshold.value = -18;
+      chain.compressor.knee.value = 24;
+      chain.compressor.ratio.value = 4;
+      chain.compressor.attack.value = 0.005;
+      chain.compressor.release.value = 0.25;
+      chain.makeupGain.gain.value = 1.35;
+    } else {
+      chain.compressor.threshold.value = -1;
+      chain.compressor.knee.value = 0;
+      chain.compressor.ratio.value = 1;
+      chain.compressor.attack.value = 0.003;
+      chain.compressor.release.value = 0.1;
+      chain.makeupGain.gain.value = 1.0;
+    }
+  }
+
+  function ensureAudioChainAttached() {
+    if (!equalizerEnabled && !loudnessNormalization) {
+      if (activeChain) applyAudioParams(activeChain);
+      return;
+    }
+
+    const video = document.querySelector<HTMLMediaElement>("video.html5-main-video, video");
+    if (!video) return;
+
+    const existing = attachedElements.get(video);
+    if (existing) {
+      activeChain = existing;
+      applyAudioParams(existing);
+      if (existing.ctx.state === "suspended") {
+        void existing.ctx.resume();
+      }
+      return;
+    }
+
+    if (video.currentSrc && !video.currentSrc.startsWith("blob:") && !video.crossOrigin) {
+      return;
+    }
+
+    try {
+      const AudioCtx = window.AudioContext;
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaElementSource(video);
+      const filters = EQ_FREQUENCIES.map((freq, index) => {
+        const filter = ctx.createBiquadFilter();
+        filter.frequency.value = freq;
+        if (index === 0) {
+          filter.type = "lowshelf";
+        } else if (index === EQ_FREQUENCIES.length - 1) {
+          filter.type = "highshelf";
+        } else {
+          filter.type = "peaking";
+          filter.Q.value = 1.4;
+        }
+        return filter;
+      });
+
+      const compressor = ctx.createDynamicsCompressor();
+      const makeupGain = ctx.createGain();
+
+      let tail: AudioNode = source;
+      for (const filter of filters) {
+        tail.connect(filter);
+        tail = filter;
+      }
+      tail.connect(compressor);
+      compressor.connect(makeupGain);
+      makeupGain.connect(ctx.destination);
+
+      const chain: AudioChainState = { ctx, filters, compressor, makeupGain };
+      attachedElements.set(video, chain);
+      activeChain = chain;
+      applyAudioParams(chain);
+
+      const resumeIfNeeded = () => {
+        if (ctx.state === "suspended") {
+          void ctx.resume();
+        }
+      };
+      video.addEventListener("play", resumeIfNeeded);
+      video.addEventListener("playing", resumeIfNeeded);
+      if (!video.paused) resumeIfNeeded();
+    } catch (error) {
+      console.warn("[ytmd-audio] Failed to initialize audio graph:", error);
+    }
+  }
+
+  function requestSponsorBlockSegments(videoId: string) {
+    if (!sponsorBlockEnabled || !videoId || sponsorBlockCategories.length === 0) {
+      currentSbSegments = [];
+      return;
+    }
+    window.postMessage(
+      {
+        type: "ytmd-sb-request",
+        videoId,
+        categories: [...sponsorBlockCategories]
+      },
+      "*"
+    );
+  }
+
+  window.addEventListener("message", event => {
+    if (event.source !== window || !event.data) return;
+
+    if (event.data.type === "ytmd-audio-config") {
+      equalizerEnabled = Boolean(event.data.equalizerEnabled);
+      equalizerBands = Array.isArray(event.data.equalizerBands) ? event.data.equalizerBands : equalizerBands;
+      loudnessNormalization = Boolean(event.data.loudnessNormalization);
+
+      const prevSbEnabled = sponsorBlockEnabled;
+      const prevSbCategories = JSON.stringify(sponsorBlockCategories);
+      sponsorBlockEnabled = Boolean(event.data.sponsorBlockEnabled);
+      sponsorBlockCategories = Array.isArray(event.data.sponsorBlockCategories) ? event.data.sponsorBlockCategories : [];
+
+      ensureAudioChainAttached();
+
+      const activeVideoId = playerApi.getPlayerResponse?.()?.videoDetails?.videoId ?? null;
+      if (sponsorBlockEnabled && activeVideoId && (!prevSbEnabled || prevSbCategories !== JSON.stringify(sponsorBlockCategories))) {
+        currentSbVideoId = activeVideoId;
+        skippedUuids.clear();
+        requestSponsorBlockSegments(activeVideoId);
+      } else if (!sponsorBlockEnabled) {
+        currentSbSegments = [];
+      }
+    }
+
+    if (event.data.type === "ytmd-sb-response") {
+      if (event.data.videoId === currentSbVideoId && Array.isArray(event.data.segments)) {
+        currentSbSegments = event.data.segments;
+      }
+    }
+
+    if (event.data.type === "ytmd-navigate-search") {
+      const query = typeof event.data.query === "string" ? event.data.query.trim() : "";
+      if (!query) return;
+      const ytmApp = document.querySelector("ytmusic-app");
+      (ytmApp ?? document).dispatchEvent(
+        new CustomEvent("yt-navigate", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            endpoint: {
+              searchEndpoint: {
+                query
+              }
+            }
+          }
+        })
+      );
+    }
+  });
+
+  const handleVideoChange = () => {
+    ensureAudioChainAttached();
+    const videoId = playerApi.getPlayerResponse?.()?.videoDetails?.videoId ?? null;
+    if (videoId && videoId !== currentSbVideoId) {
+      currentSbVideoId = videoId;
+      currentSbSegments = [];
+      skippedUuids.clear();
+      requestSponsorBlockSegments(videoId);
+    }
+  };
+
+  playerApi.addEventListener("onVideoDataChange", handleVideoChange);
+  playerApi.addEventListener("onVideoProgress", (progress: number) => {
+    if (!sponsorBlockEnabled || currentSbSegments.length === 0 || !Number.isFinite(progress)) return;
+
+    for (const seg of currentSbSegments) {
+      if (seg.actionType && seg.actionType !== "skip") continue;
+      const [start, end] = seg.segment;
+      if (progress >= start && progress < end - 0.35 && !skippedUuids.has(seg.UUID)) {
+        skippedUuids.add(seg.UUID);
+        playerApi.seekTo(end, true);
+        window.postMessage({ type: "ytmd-sb-skipped", category: seg.category }, "*");
+        break;
+      }
+    }
+  });
+
+  window.postMessage({ type: "ytmd-page-audio-ready" }, "*");
 }

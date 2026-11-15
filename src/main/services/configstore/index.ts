@@ -2,7 +2,7 @@ import Conf from "conf";
 import { app, ipcMain } from "electron";
 import log from "electron-log";
 import { AdblockerFilterSet, StoreSchema, TrayIconStyle } from "~shared/store/schema";
-import { DependencyConstructor, Paths, ValueAtPath } from "~shared/types";
+import { DependencyConstructor } from "~shared/types";
 import Service from "../service";
 import AppWindowManager from "../windowmanager";
 
@@ -38,6 +38,10 @@ export default class ConfigStore extends Service {
           alwaysShowVolumeSlider: false,
           customCSSEnabled: false,
           customCSSPath: null,
+          inlineCustomCSS: "",
+          glassThemeEnabled: true,
+          ambientGlowEnabled: false,
+          accentColor: "#ff2e4c",
           zoom: 100,
           trayIconStyle: TrayIconStyle.Auto
         },
@@ -46,7 +50,11 @@ export default class ConfigStore extends Service {
           continueWhereYouLeftOffPaused: true,
           enableSpeakerFill: false,
           progressInTaskbar: false,
-          ratioVolume: false
+          ratioVolume: false,
+          equalizerEnabled: false,
+          equalizerPreset: "flat",
+          equalizerBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          loudnessNormalization: false
         },
         integrations: {
           companionServerEnabled: false,
@@ -62,7 +70,12 @@ export default class ConfigStore extends Service {
           cosmeticFilteringEnabled: true,
           scriptletsEnabled: true,
           extensionsEnabled: false,
-          extensions: []
+          extensions: [],
+          totalBlockedLifetime: 0,
+          lastFilterUpdateAt: null,
+          customRules: "",
+          sponsorBlockEnabled: true,
+          sponsorBlockCategories: ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"]
         },
         shortcuts: {
           playPause: "",
@@ -211,6 +224,24 @@ export default class ConfigStore extends Service {
             // @ts-expect-error Removed store key
             store.delete("lastfm.token");
           }
+        },
+        ">=3.0.0": store => {
+          if (!store.has("appearance.inlineCustomCSS")) store.set("appearance.inlineCustomCSS", "");
+          if (!store.has("appearance.glassThemeEnabled")) store.set("appearance.glassThemeEnabled", true);
+          if (!store.has("appearance.ambientGlowEnabled")) store.set("appearance.ambientGlowEnabled", false);
+          if (!store.has("appearance.accentColor")) store.set("appearance.accentColor", "#ff2e4c");
+          if (!store.has("playback.equalizerEnabled")) store.set("playback.equalizerEnabled", false);
+          if (!store.has("playback.equalizerPreset")) store.set("playback.equalizerPreset", "flat");
+          if (!store.has("playback.equalizerBands")) store.set("playback.equalizerBands", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+          if (!store.has("playback.loudnessNormalization")) store.set("playback.loudnessNormalization", false);
+          if (!store.has("adblocker.totalBlockedLifetime")) store.set("adblocker.totalBlockedLifetime", 0);
+          if (!store.has("adblocker.lastFilterUpdateAt")) store.set("adblocker.lastFilterUpdateAt", null);
+          if (!store.has("adblocker.customRules")) store.set("adblocker.customRules", "");
+          if (!store.has("adblocker.sponsorBlockEnabled")) store.set("adblocker.sponsorBlockEnabled", true);
+          if (!store.has("adblocker.sponsorBlockCategories")) {
+            store.set("adblocker.sponsorBlockCategories", ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"]);
+          }
+          store.set("metadata.appVersion", "3.0.0");
         }
       }
     });

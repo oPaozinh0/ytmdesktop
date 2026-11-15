@@ -75,7 +75,7 @@ export default class LastFMClient {
     this.sessionKey = sessionKey;
   }
 
-  private sign(body) {
+  private sign(body: Record<string, string>) {
     const bodySignature = Object.keys(body)
       .sort()
       .map((key) => `${key}${body[key]}`)
@@ -125,14 +125,16 @@ export default class LastFMClient {
       }
 
       const strippedParams = Object.fromEntries(
-        Object.entries(params).filter(([_, value]) => value != null && value != undefined),
+        Object.entries(params)
+          .filter(([, value]) => value != null)
+          .map(([key, value]) => [key, String(value)]),
       );
-      const body = {
+      const body: Record<string, string> = {
         ...strippedParams,
         method,
         api_key: this.apiKey,
       };
-      if (authenticated) body.sk = this.sessionKey;
+      if (authenticated && this.sessionKey) body.sk = this.sessionKey;
       body.api_sig = this.sign(body);
       body.format = "json";
 

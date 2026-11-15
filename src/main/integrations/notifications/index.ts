@@ -121,7 +121,7 @@ export default class NowPlayingNotifications extends Integration {
           try {
             let data = await getUrlContents(thumbnailUrl);
             displayNotification(state.videoDetails, data);
-          } catch(err) {
+          } catch {
             displayNotification(state.videoDetails, null);
           }
         } else {
