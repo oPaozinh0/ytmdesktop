@@ -9,7 +9,7 @@ const props = defineProps({
 });
 const emit = defineEmits(["update:modelValue", "change"]);
 
-const keybindInput = ref(null);
+const keybindInput = ref<HTMLInputElement | null>(null);
 const isEditing = ref(false);
 
 const currentKeybind = computed({
@@ -22,8 +22,13 @@ const currentKeybind = computed({
   }
 });
 
+const keyTokens = computed(() => {
+  if (!currentKeybind.value) return [];
+  return currentKeybind.value.split("+");
+});
+
 function startEditing() {
-  keybindInput.value.focus();
+  keybindInput.value?.focus();
 }
 
 function keybindInputFocused() {
@@ -93,7 +98,7 @@ function keybindInputKeyDown(event: KeyboardEvent) {
 
   if (event.key === "Escape") {
     currentKeybind.value = "";
-    keybindInput.value.blur();
+    keybindInput.value?.blur();
     event.preventDefault();
     return;
   }
@@ -104,7 +109,7 @@ function keybindInputKeyDown(event: KeyboardEvent) {
   if (event.shiftKey) newKeybind += "Shift+";
 
   newKeybind += validateKey(event);
-  keybindInput.value.blur();
+  keybindInput.value?.blur();
 
   currentKeybind.value = newKeybind;
 
@@ -113,21 +118,37 @@ function keybindInputKeyDown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div :class="{ 'keybind': true, 'is-editing': isEditing }">
-    <p
-      v-if="!currentKeybind"
-      class="keybind-text"
+  <div :class="{ keybind: true, 'is-editing': isEditing }">
+    <div
+      class="keybind-display"
       @click="startEditing"
     >
-      None
-    </p>
-    <p
-      v-else
-      class="keybind-text"
-      @click="startEditing"
-    >
-      {{ currentKeybind }}
-    </p>
+      <span
+        v-if="isEditing"
+        class="recording-hint"
+      >
+        Press shortcut...
+      </span>
+      <span
+        v-else-if="keyTokens.length === 0"
+        class="empty-keybind"
+      >
+        Click to set
+      </span>
+      <div
+        v-else
+        class="kbd-list"
+      >
+        <kbd
+          v-for="(token, idx) in keyTokens"
+          :key="`${token}-${idx}`"
+          class="kbd-chip"
+        >
+          {{ token }}
+        </kbd>
+      </div>
+    </div>
+
     <input
       ref="keybindInput"
       class="keybind-input"
@@ -136,12 +157,14 @@ function keybindInputKeyDown(event: KeyboardEvent) {
       @blur="keybindInputBlurred"
       @keydown="keybindInputKeyDown"
     >
+
     <button
       class="remove"
       :disabled="!currentKeybind"
+      title="Clear shortcut"
       @click="currentKeybind = ''"
     >
-      <span class="material-symbols-outlined">delete</span>
+      <span class="material-symbols-outlined">close</span>
     </button>
   </div>
 </template>
@@ -150,49 +173,97 @@ function keybindInputKeyDown(event: KeyboardEvent) {
 .keybind {
   position: relative;
   user-select: none;
-  cursor: pointer;
-  display: flex;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.keybind:hover {
+  border-color: var(--border-strong);
 }
 
 .keybind.is-editing {
-  border: 2px solid #f44336;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.keybind-text {
-  background-color: #212121;
-  border: none;
-  padding: 8px;
-  border-radius: 4px;
-  width: 216px;
-  height: 20px;
-  margin: 0;
+.keybind-display {
+  min-width: 210px;
+  min-height: 34px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.empty-keybind {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.recording-hint {
+  color: #ff6e89;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kbd-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.kbd-chip {
+  font-family: "Open Sans", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  line-height: 1.3;
 }
 
 .keybind-input {
   width: 0;
   height: 0;
+  opacity: 0;
   position: absolute;
-  background: none;
-  border: none;
-  outline: none;
+  pointer-events: none;
 }
 
 .remove {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: #212121;
-  border-color: #323232;
-  border-style: solid;
-  border-width: 0 0 0 1px;
-  border-radius: 0 4px 4px 0;
+  width: 32px;
+  height: 34px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  border: none;
+  border-left: 1px solid var(--border-subtle);
   cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
 }
 
 .remove:disabled {
-  border-color: #323232;
-  border-style: solid;
-  border-width: 0 0 0 1px;
+  opacity: 0.35;
   cursor: not-allowed;
+}
+
+.remove .material-symbols-outlined {
+  font-size: 16px;
 }
 </style>

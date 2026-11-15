@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import KeybindInput from "../../components/KeybindInput.vue";
+import ShieldLogo from "../../components/ShieldLogo.vue";
 import YTMDSetting from "../../components/YTMDSetting.vue";
 import { AdblockerFilterSet, ExtensionLoadError, LoadedExtension, StoreSchema, TrayIconStyle, UserExtension } from "~shared/store/schema";
 import { AuthToken } from "~shared/integrations/companion-server/types";
-import logo from "~assets/icons/ytmd.png";
 
 declare const YTMD_GIT_COMMIT_HASH: string | undefined;
 declare const YTMD_GIT_BRANCH: string | undefined;
@@ -18,16 +18,22 @@ const processVersions = window.ytmd.processVersions;
 const isDarwin = window.ytmd.isDarwin;
 const isLinux = window.ytmd.isLinux;
 
-const currentTab = ref(1);
+const store = window.ytmd.store;
+const memoryStore = window.ytmd.memoryStore;
+const safeStorage = window.ytmd.safeStorage;
+
+const initialRequestedTab = await memoryStore.get("settingsInitialTab");
+const currentTab = ref<number>(typeof initialRequestedTab === "number" ? initialRequestedTab : 6);
+if (typeof initialRequestedTab === "number") {
+  memoryStore.set("settingsInitialTab", null);
+}
+
+const searchQuery = ref<string>("");
 const requiresRestart = ref(false);
 const checkingForUpdate = ref(false);
 const updateAvailable = ref(await window.ytmd.isAppUpdateAvailable());
 const updateNotAvailable = ref(false);
 const updateDownloaded = ref(await window.ytmd.isAppUpdateDownloaded());
-
-const store = window.ytmd.store;
-const memoryStore = window.ytmd.memoryStore;
-const safeStorage = window.ytmd.safeStorage;
 
 const safeStorageAvailable = ref<boolean>(await memoryStore.get("safeStorageAvailable"));
 
@@ -163,6 +169,12 @@ const extensionsLoaded = ref<LoadedExtension[]>((await memoryStore.get("extensio
 const extensionsLoadErrors = ref<ExtensionLoadError[]>((await memoryStore.get("extensionsLoadErrors")) ?? []);
 
 memoryStore.onStateChanged(newState => {
+  if (typeof newState.settingsInitialTab === "number") {
+    currentTab.value = newState.settingsInitialTab;
+    searchQuery.value = "";
+    memoryStore.set("settingsInitialTab", null);
+  }
+
   discordPresenceConnectionFailed.value = newState.discordPresenceConnectionFailed;
 
   shortcutsPlayPauseRegisterFailed.value = newState.shortcutsPlayPauseRegisterFailed;
@@ -193,6 +205,91 @@ memoryStore.onStateChanged(newState => {
   adblockerBlockedCount.value = newState.adblockerBlockedCount ?? 0;
   extensionsLoaded.value = newState.extensionsLoaded ?? [];
   extensionsLoadErrors.value = newState.extensionsLoadErrors ?? [];
+});
+
+type SearchEntry = {
+  tab: number;
+  tabLabel: string;
+  title: string;
+  description: string;
+};
+
+const searchableSettings: SearchEntry[] = [
+  { tab: 6, tabLabel: "Ad Shield", title: "Built-in ad blocker", description: "Block audio, video, and banner ads with EasyList & uBlock lists" },
+  { tab: 6, tabLabel: "Ad Shield", title: "Filter lists", description: "Choose between Ads only, Ads and trackers, or Full protection" },
+  { tab: 6, tabLabel: "Ad Shield", title: "Cosmetic filtering", description: "Hide empty ad containers inside YouTube Music" },
+  { tab: 6, tabLabel: "Ad Shield", title: "Scriptlet injection", description: "Anti-ad scripts to stop in-stream ads between songs" },
+  { tab: 6, tabLabel: "Ad Shield", title: "Browser extensions", description: "Load unpacked Chrome Manifest V2 extensions such as uBlock Origin" },
+  { tab: 1, tabLabel: "General", title: "Hide to tray on close", description: "Keep playback alive in the system tray when closing the window" },
+  { tab: 1, tabLabel: "General", title: "Show notification on song change", description: "Desktop notifications when a track changes" },
+  { tab: 1, tabLabel: "General", title: "Start on boot", description: "Launch YTM Shield automatically with your OS" },
+  { tab: 1, tabLabel: "General", title: "Disable hardware acceleration", description: "Useful if experiencing GPU flickering (requires restart)" },
+  { tab: 2, tabLabel: "Appearance", title: "Always show volume slider", description: "Keep the volume slider visible on legacy player bars" },
+  { tab: 2, tabLabel: "Appearance", title: "Custom CSS", description: "Apply your own stylesheet to YouTube Music" },
+  { tab: 2, tabLabel: "Appearance", title: "Zoom", description: "Scale interface zoom from 30% to 300%" },
+  { tab: 2, tabLabel: "Appearance", title: "Tray icon style", description: "Choose Auto, White, or Black tray icon on Linux" },
+  { tab: 3, tabLabel: "Playback", title: "Continue where you left off", description: "Resume previous song or playlist automatically on launch" },
+  { tab: 3, tabLabel: "Playback", title: "Pause on application launch", description: "Restore queue in paused state" },
+  { tab: 3, tabLabel: "Playback", title: "Show track progress on taskbar", description: "Display playback progress bar in the OS taskbar" },
+  { tab: 3, tabLabel: "Playback", title: "Enable speaker fill", description: "Upmix stereo audio for multi-channel setups" },
+  { tab: 3, tabLabel: "Playback", title: "Ratio volume", description: "Use logarithmic/ratio scaling for volume control" },
+  { tab: 4, tabLabel: "Integrations", title: "Companion server", description: "Local WebSocket/REST API for remote companion apps" },
+  { tab: 4, tabLabel: "Integrations", title: "Discord rich presence", description: "Show listening status in Discord profile" },
+  { tab: 4, tabLabel: "Integrations", title: "Last.fm scrobbling", description: "Scrobble tracks and configure scrobble threshold percentage" },
+  { tab: 4, tabLabel: "Integrations", title: "Enhanced media service", description: "Advanced OS media keys & transport integration (Beta)" },
+  { tab: 5, tabLabel: "Shortcuts", title: "Global keyboard shortcuts", description: "Play/Pause, Next, Previous, Thumbs Up/Down, Volume, Shuffle, Repeat" },
+  { tab: 99, tabLabel: "About", title: "About & updates", description: "Version details, commits, GitHub repository, and update checker" }
+];
+
+const searchResults = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return [];
+  return searchableSettings.filter(
+    item =>
+      item.title.toLowerCase().includes(q) ||
+      item.description.toLowerCase().includes(q) ||
+      item.tabLabel.toLowerCase().includes(q)
+  );
+});
+
+const activeTabMeta = computed(() => {
+  switch (currentTab.value) {
+    case 6:
+      return { title: "Ad Shield", subtitle: "Engine blocking, filter rules, and Manifest V2 Chrome extensions" };
+    case 1:
+      return { title: "General", subtitle: "Application startup, tray behavior, and hardware preferences" };
+    case 2:
+      return { title: "Appearance", subtitle: "Custom styles, page zoom, and player visual tweaks" };
+    case 3:
+      return { title: "Playback", subtitle: "Session resume, audio output, and taskbar integration" };
+    case 4:
+      return { title: "Integrations", subtitle: "Companion server, Discord Rich Presence, Last.fm, and OS media controls" };
+    case 5:
+      return { title: "Shortcuts", subtitle: "Global keyboard bindings active anywhere on your desktop" };
+    case 99:
+      return { title: "About YTM Shield", subtitle: "Build details, automatic updates, and repository links" };
+    default:
+      return { title: "Settings", subtitle: "" };
+  }
+});
+
+const filterSetSummary = computed(() => {
+  switch (adblockerFilterSet.value) {
+    case AdblockerFilterSet.AdsOnly:
+      return "Ads Only";
+    case AdblockerFilterSet.AdsAndTracking:
+      return "Ads + Trackers";
+    case AdblockerFilterSet.Full:
+      return "Full Shield";
+    default:
+      return "Custom";
+  }
+});
+
+onMounted(() => {
+  if (typeof initialRequestedTab === "number") {
+    currentTab.value = initialRequestedTab;
+  }
 });
 
 async function memorySettingsChanged() {
@@ -255,9 +352,9 @@ async function settingChangedFile(event: Event) {
     throw new Error("No setting specified in File Input");
   }
 
-  store.set(setting, target.files.length > 0 ? window.ytmd.getTrueFilePath(target.files[0]) : null);
+  store.set(setting, target.files?.length ? window.ytmd.getTrueFilePath(target.files[0]) : null);
 
-  target.value = null;
+  target.value = "";
 }
 
 async function restartDiscordPresence() {
@@ -300,17 +397,27 @@ function extensionStatus(extension: UserExtension) {
   if (error) return error.message;
 
   const loaded = extensionsLoaded.value.find(loadedExtension => loadedExtension.path === extension.path);
-  if (loaded) return `Loaded${loaded.version ? ` • ${loaded.version}` : ""}`;
+  if (loaded) return `Loaded${loaded.version ? ` v${loaded.version}` : ""}`;
 
-  return extensionsEnabled.value ? "Not loaded" : "Extensions are disabled";
+  return extensionsEnabled.value ? "Not loaded" : "Extensions disabled";
 }
 
 function extensionHasError(extension: UserExtension) {
   return extensionsLoadErrors.value.some(loadError => loadError.path === extension.path);
 }
 
+function extensionIsLoaded(extension: UserExtension) {
+  return extensionsLoaded.value.some(loadedExtension => loadedExtension.path === extension.path);
+}
+
 function changeTab(newTab: number) {
+  searchQuery.value = "";
   currentTab.value = newTab;
+}
+
+function jumpToSearchResult(tab: number) {
+  currentTab.value = tab;
+  searchQuery.value = "";
 }
 
 function restartApplication() {
@@ -341,708 +448,932 @@ function stepLastFMAuth() {
 <template>
   <div class="settings-container">
     <div class="content-container">
-      <ul class="sidebar">
-        <li
-          :class="{ active: currentTab === 1 }"
-          @click="changeTab(1)"
-        >
-          <span class="material-symbols-outlined">settings_applications</span>General
-        </li>
-        <li
-          :class="{ active: currentTab === 2 }"
-          @click="changeTab(2)"
-        >
-          <span class="material-symbols-outlined">brush</span>Appearance
-        </li>
-        <li
-          :class="{ active: currentTab === 3 }"
-          @click="changeTab(3)"
-        >
-          <span class="material-symbols-outlined">music_note</span>Playback
-        </li>
-        <li
-          :class="{ active: currentTab === 4 }"
-          @click="changeTab(4)"
-        >
-          <span class="material-symbols-outlined">wifi_tethering</span>Integrations
-        </li>
-        <li
-          :class="{ active: currentTab === 6 }"
-          @click="changeTab(6)"
-        >
-          <span class="material-symbols-outlined">shield</span>Adblock
-        </li>
-        <li
-          :class="{ active: currentTab === 5 }"
-          @click="changeTab(5)"
-        >
-          <span class="material-symbols-outlined">keyboard</span>Shortcuts
-        </li>
-        <span class="push" />
-        <li
-          :class="{ active: currentTab === 99 }"
-          @click="changeTab(99)"
-        >
-          <span class="material-symbols-outlined">info</span>About
-        </li>
-      </ul>
-      <div class="content">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <ShieldLogo :size="26" />
+          <div class="sidebar-brand-meta">
+            <span class="sidebar-brand-title">YTM Shield</span>
+            <span class="sidebar-brand-version">v{{ ytmdVersion }}</span>
+          </div>
+        </div>
+
+        <div class="sidebar-search">
+          <span class="material-symbols-outlined search-icon">search</span>
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="search-input"
+            placeholder="Find setting..."
+          >
+          <button
+            v-if="searchQuery"
+            class="search-clear"
+            @click="searchQuery = ''"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <ul class="nav-list">
+          <li
+            :class="{ active: !searchQuery && currentTab === 6 }"
+            @click="changeTab(6)"
+          >
+            <span class="material-symbols-outlined">shield</span>
+            <span class="nav-label">Ad Shield</span>
+            <span
+              class="nav-shield-dot"
+              :class="{ ok: adblockerEnabled && adblockerReady, off: !adblockerEnabled, err: adblockerFailed }"
+            />
+          </li>
+          <li
+            :class="{ active: !searchQuery && currentTab === 1 }"
+            @click="changeTab(1)"
+          >
+            <span class="material-symbols-outlined">tune</span>
+            <span class="nav-label">General</span>
+          </li>
+          <li
+            :class="{ active: !searchQuery && currentTab === 2 }"
+            @click="changeTab(2)"
+          >
+            <span class="material-symbols-outlined">palette</span>
+            <span class="nav-label">Appearance</span>
+          </li>
+          <li
+            :class="{ active: !searchQuery && currentTab === 3 }"
+            @click="changeTab(3)"
+          >
+            <span class="material-symbols-outlined">graphic_eq</span>
+            <span class="nav-label">Playback</span>
+          </li>
+          <li
+            :class="{ active: !searchQuery && currentTab === 4 }"
+            @click="changeTab(4)"
+          >
+            <span class="material-symbols-outlined">hub</span>
+            <span class="nav-label">Integrations</span>
+          </li>
+          <li
+            :class="{ active: !searchQuery && currentTab === 5 }"
+            @click="changeTab(5)"
+          >
+            <span class="material-symbols-outlined">keyboard</span>
+            <span class="nav-label">Shortcuts</span>
+          </li>
+          <span class="push" />
+          <li
+            :class="{ active: !searchQuery && currentTab === 99 }"
+            @click="changeTab(99)"
+          >
+            <span class="material-symbols-outlined">info</span>
+            <span class="nav-label">About</span>
+          </li>
+        </ul>
+      </aside>
+
+      <main class="content">
         <div
           v-if="requiresRestart"
           class="restart-banner"
         >
           <p class="message">
-            <span class="material-symbols-outlined">autorenew</span> Restart app to apply changes
+            <span class="material-symbols-outlined">autorenew</span> Restart YTM Shield to apply changes
           </p>
           <button
             class="restart-button"
             @click="restartApplication"
           >
-            Restart
+            Restart Now
           </button>
         </div>
-        <div
-          v-if="currentTab === 1"
-          class="general-tab"
-        >
-          <YTMDSetting
-            v-if="!isDarwin"
-            v-model="hideToTrayOnClose"
-            type="checkbox"
-            name="Hide to tray on close"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="showNotificationOnSongChange"
-            type="checkbox"
-            name="Show notification on song change"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="startOnBoot"
-            type="checkbox"
-            name="Start on boot"
-            @change="settingsChanged"
-          />
-          <!--<div class="setting">
-            <p>Start minimized</p>
-            <input v-model="startMinimized" @change="settingsChanged" class="toggle" type="checkbox" />
-          </div>-->
-          <YTMDSetting
-            v-model="disableHardwareAcceleration"
-            type="checkbox"
-            restart-required
-            name="Disable hardware acceleration"
-            @change="settingChangedRequiresRestart"
-          />
-        </div>
 
         <div
-          v-if="currentTab === 2"
-          class="appearance-tab"
+          v-if="searchQuery.trim().length > 0"
+          class="search-results-view"
         >
-          <YTMDSetting
-            v-model="alwaysShowVolumeSlider"
-            type="checkbox"
-            name="Always show volume slider"
-            description="This feature only works on the old player bar and may not work for you"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="customCSSEnabled"
-            type="checkbox"
-            name="Custom CSS"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="customCSSEnabled"
-            v-model="customCSSPath"
-            type="file"
-            indented
-            bind-setting="appearance.customCSSPath"
-            name="Custom CSS file path"
-            @file-change="settingChangedFile"
-            @clear="removeCustomCSSPath"
-          />
-          <YTMDSetting
-            v-model="zoom"
-            type="range"
-            max="300"
-            min="30"
-            step="10"
-            name="Zoom"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="isLinux"
-            v-model="trayIconStyle"
-            :options-map="{ [TrayIconStyle.Auto]: 'Auto', [TrayIconStyle.White]: 'White', [TrayIconStyle.Black]: 'Black' }"
-            type="select"
-            name="Tray icon style"
-            @change="settingsChanged"
-          />
-        </div>
-
-        <div
-          v-if="currentTab === 3"
-          class="playback-tab"
-        >
-          <YTMDSetting
-            v-model="continueWhereYouLeftOff"
-            name="Continue where you left off"
-            description="If you're signed in this feature can be turned off"
-            type="checkbox"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="continueWhereYouLeftOff"
-            v-model="continueWhereYouLeftOffPaused"
-            type="checkbox"
-            indented
-            name="Pause on application launch"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="progressInTaskbar"
-            type="checkbox"
-            name="Show track progress on taskbar"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="enableSpeakerFill"
-            type="checkbox"
-            restart-required
-            name="Enable speaker fill"
-            @change="settingChangedRequiresRestart"
-          />
-          <YTMDSetting
-            v-model="ratioVolume"
-            type="checkbox"
-            name="Ratio volume"
-            @change="settingsChanged"
-          />
-        </div>
-
-        <div
-          v-if="currentTab === 4"
-          class="integrations-tab"
-        >
-          <YTMDSetting
-            v-model="companionServerEnabled"
-            type="checkbox"
-            name="Companion server"
-            :disabled="!safeStorageAvailable"
-            disabled-message="This integration cannot be enabled due to safeStorage being unavailable"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="companionServerEnabled && safeStorageAvailable"
-            v-model="companionServerCORSWildcardEnabled"
-            type="checkbox"
-            indented
-            name="Allow browser communication"
-            description="This setting could be dangerous as it allows any website you visit to communicate with the companion server"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="companionServerEnabled && safeStorageAvailable"
-            v-model="companionServerAuthWindowEnabled"
-            type="checkbox"
-            indented
-            name="Enable companion authorization"
-            description="Automatically disables after the first successful authorization or 5 minutes has passed"
-            @change="memorySettingsChanged"
-          />
-          <YTMDSetting
-            v-if="companionServerEnabled && safeStorageAvailable"
-            type="custom"
-            flex-column
-            indented
-            name="Authorized companions"
-            description="This is a list of companions that currently have access to the companion server"
-            @change="settingsChanged"
-          >
-            <table class="authorized-companions-table">
-              <thead>
-                <tr>
-                  <th class="companion">
-                    Companion
-                  </th>
-                  <th class="version">
-                    Version
-                  </th>
-                  <th class="controls" />
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="authToken in companionServerAuthTokens"
-                  :key="authToken.appId"
-                >
-                  <td class="companion">
-                    <span class="name">{{ authToken.appName }}</span><br>
-                    <span class="id">{{ authToken.appId }}</span>
-                  </td>
-                  <td class="version">
-                    {{ authToken.appVersion }}
-                  </td>
-                  <td class="controls">
-                    <button @click="deleteCompanionAuthToken(authToken.appId)">
-                      <span class="material-symbols-outlined">delete</span>
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div
-              v-if="companionServerAuthTokens.length === 0"
-              class="no-authorized-companions"
-            >
-              <td>No authorized companions</td>
-            </div>
-          </YTMDSetting>
-          <YTMDSetting
-            v-model="discordPresenceEnabled"
-            type="checkbox"
-            name="Discord rich presence"
-            @change="settingsChanged"
-          />
-          <div
-            v-if="discordPresenceEnabled && discordPresenceConnectionFailed"
-            class="setting indented"
-          >
-            <p class="discord-failure">
-              Discord connection could not be established after 30 attempts
-            </p>
-            <button @click="restartDiscordPresence">
-              Retry
-            </button>
+          <div class="section-header">
+            <h1>Search Results</h1>
+            <p>{{ searchResults.length }} match{{ searchResults.length === 1 ? "" : "es" }} for "{{ searchQuery.trim() }}"</p>
           </div>
-          <YTMDSetting
-            v-model="lastFMEnabled"
-            type="checkbox"
-            name="Last.fm scrobbling"
-            :disabled="!safeStorageAvailable"
-            disabled-message="This integration cannot be enabled due to safeStorage being unavailable"
-            @change="settingsChanged"
-          />
           <div
-            v-if="lastFMEnabled"
-            class="setting indented"
+            v-if="searchResults.length === 0"
+            class="empty-search"
           >
-            <div class="name-with-description">
-              <p class="description">
-                User is Authenticated:
-                <span
-                  v-if="lastFMSessionKey"
-                  style="color: #4caf50"
-                >Yes</span>
-                <span
-                  v-else
-                  style="color: #ff1100"
-                >No</span>
-              </p>
-            </div>
+            <span class="material-symbols-outlined">search_off</span>
+            <p>No matching settings found.</p>
+          </div>
+          <div
+            v-else
+            class="search-list"
+          >
             <button
-              v-if="lastFMSessionKey"
-              @click="logoutLastFM"
+              v-for="entry in searchResults"
+              :key="`${entry.tab}-${entry.title}`"
+              class="search-card"
+              @click="jumpToSearchResult(entry.tab)"
             >
-              Logout
+              <div class="search-card-body">
+                <span class="search-card-title">{{ entry.title }}</span>
+                <span class="search-card-desc">{{ entry.description }}</span>
+              </div>
+              <span class="search-card-tab">{{ entry.tabLabel }}</span>
             </button>
           </div>
-          <div
-            v-if="lastFMEnabled && lastFMAuthenticationStep === 0"
-            class="setting indented"
-          >
-            <p>
-              Continue setup in your browser then come back here when you're done
-            </p>
-            <button @click="stepLastFMAuth">
-              Authorize Last.fm in browser
-            </button>
-          </div>
-          <div
-            v-if="lastFMEnabled && lastFMAuthenticationStep === 1"
-            class="setting indented"
-          >
-            <p>
-              After you're done in the browser click "Finish Last.fm authentication"
-            </p>
-            <button @click="stepLastFMAuth">
-              Finish Last.fm authentication
-            </button>
-          </div>
-          <YTMDSetting
-            v-if="lastFMEnabled"
-            v-model="scrobblePercent"
-            class="settings indented"
-            type="range"
-            name="Scrobble percent"
-            description="Determines when a song is scrobbled"
-            min="50"
-            max="95"
-            step="5"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-model="enhancedMediaServiceEnabled"
-            type="checkbox"
-            restart-required
-            name="Enhanced media service"
-            description="An enhanced media service that can provide better media button controls"
-            :disabled="isDarwin"
-            disabled-message="This integration is not available on your platform"
-            beta
-            @change="settingChangedRequiresRestart"
-          />
         </div>
 
-        <div
-          v-if="currentTab === 6"
-          class="adblock-tab"
-        >
-          <YTMDSetting
-            v-model="adblockerEnabled"
-            type="checkbox"
-            name="Built-in ad blocker"
-            description="Blocks ads and trackers using EasyList and uBlock Origin filter lists"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="adblockerEnabled"
-            v-model="adblockerFilterSet"
-            :options-map="{
-              [AdblockerFilterSet.AdsOnly]: 'Ads only',
-              [AdblockerFilterSet.AdsAndTracking]: 'Ads and trackers',
-              [AdblockerFilterSet.Full]: 'Ads, trackers and annoyances'
-            }"
-            type="select"
-            indented
-            name="Filter lists"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="adblockerEnabled"
-            v-model="adblockerCosmeticFilteringEnabled"
-            type="checkbox"
-            indented
-            name="Cosmetic filtering"
-            description="Also hides ad placeholders left behind in the page"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="adblockerEnabled && adblockerCosmeticFilteringEnabled"
-            v-model="adblockerScriptletsEnabled"
-            type="checkbox"
-            indented
-            name="Scriptlet injection"
-            description="Runs the filter lists' anti-ad scripts. This is what stops the ads YouTube Music plays between songs, since those are served from the same domain as the music. Turn it off if playback starts misbehaving."
-            @change="settingsChanged"
-          />
+        <template v-else>
           <div
-            v-if="adblockerEnabled"
-            class="setting indented"
+            v-if="currentTab !== 99"
+            class="section-header"
           >
-            <p
-              v-if="adblockerFailed"
-              class="adblock-status error"
-            >
-              Filter lists could not be loaded. Check your connection and restart the app.
-            </p>
-            <p
-              v-else-if="adblockerReady"
-              class="adblock-status"
-            >
-              {{ adblockerBlockedCount }} requests blocked this session
-            </p>
-            <p
-              v-else
-              class="adblock-status"
-            >
-              Loading filter lists...
-            </p>
+            <h1>{{ activeTabMeta.title }}</h1>
+            <p>{{ activeTabMeta.subtitle }}</p>
           </div>
 
-          <YTMDSetting
-            v-model="extensionsEnabled"
-            type="checkbox"
-            name="Browser extensions"
-            description="Loads unpacked Chrome extensions such as uBlock Origin into YouTube Music"
-            @change="settingsChanged"
-          />
-          <YTMDSetting
-            v-if="extensionsEnabled"
-            type="custom"
-            flex-column
-            indented
-            name="Installed extensions"
-            description="Electron only implements part of the Chrome extension APIs. Manifest V2 blockers work, Manifest V3 blockers relying on declarativeNetRequest (such as uBlock Origin Lite) will not block anything."
+          <div
+            v-if="currentTab === 6"
+            class="adblock-tab"
           >
-            <table class="extensions-table">
-              <thead>
-                <tr>
-                  <th class="extension">Extension</th>
-                  <th class="controls" />
-                </tr>
-              </thead>
-              <tbody>
-                <tr
+            <div
+              class="shield-hero"
+              :class="{ active: adblockerEnabled && adblockerReady, paused: !adblockerEnabled, error: adblockerFailed }"
+            >
+              <div class="shield-hero-left">
+                <div class="shield-emblem-box">
+                  <ShieldLogo
+                    :size="42"
+                    :glow="adblockerEnabled"
+                  />
+                </div>
+                <div class="shield-hero-text">
+                  <div class="shield-hero-status-row">
+                    <span class="hero-status-pill">
+                      <span class="hero-dot" />
+                      {{
+                        !adblockerEnabled
+                          ? "Protection Paused"
+                          : adblockerFailed
+                            ? "Filter Error"
+                            : adblockerReady
+                              ? "Shield Active"
+                              : "Initializing Filters"
+                      }}
+                    </span>
+                  </div>
+                  <h2>
+                    <span v-if="!adblockerEnabled">Ad Shield is currently paused</span>
+                    <span v-else-if="adblockerFailed">Could not load filter lists</span>
+                    <span v-else>{{ adblockerBlockedCount.toLocaleString() }} ads & trackers blocked</span>
+                  </h2>
+                  <p v-if="adblockerFailed">
+                    Check your internet connection and restart YTM Shield to retry filter initialization.
+                  </p>
+                  <p v-else>
+                    Real-time network filtering, cosmetic element hiding, and audio stream scriptlets.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="adblockerEnabled"
+              class="protection-strip"
+            >
+              <div class="strip-card">
+                <span class="strip-label">Filter Profile</span>
+                <span class="strip-value">{{ filterSetSummary }}</span>
+              </div>
+              <div class="strip-card">
+                <span class="strip-label">Cosmetic Hiding</span>
+                <span
+                  class="strip-value"
+                  :class="{ on: adblockerCosmeticFilteringEnabled }"
+                >
+                  {{ adblockerCosmeticFilteringEnabled ? "Enabled" : "Off" }}
+                </span>
+              </div>
+              <div class="strip-card">
+                <span class="strip-label">Stream Scriptlets</span>
+                <span
+                  class="strip-value"
+                  :class="{ on: adblockerCosmeticFilteringEnabled && adblockerScriptletsEnabled }"
+                >
+                  {{ adblockerCosmeticFilteringEnabled && adblockerScriptletsEnabled ? "Active" : "Off" }}
+                </span>
+              </div>
+            </div>
+
+            <YTMDSetting
+              v-model="adblockerEnabled"
+              type="checkbox"
+              name="Built-in ad blocker"
+              description="Blocks ads and trackers using EasyList and uBlock Origin filter lists"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="adblockerEnabled"
+              v-model="adblockerFilterSet"
+              :options-map="{
+                [AdblockerFilterSet.AdsOnly]: 'Ads only',
+                [AdblockerFilterSet.AdsAndTracking]: 'Ads and trackers',
+                [AdblockerFilterSet.Full]: 'Ads, trackers and annoyances'
+              }"
+              type="select"
+              indented
+              name="Filter lists"
+              description="Choose filtering aggressiveness for network and cosmetic rules"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="adblockerEnabled"
+              v-model="adblockerCosmeticFilteringEnabled"
+              type="checkbox"
+              indented
+              name="Cosmetic filtering"
+              description="Hides ad placeholders and promotional cards inside YouTube Music"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="adblockerEnabled && adblockerCosmeticFilteringEnabled"
+              v-model="adblockerScriptletsEnabled"
+              type="checkbox"
+              indented
+              name="Scriptlet injection"
+              description="Runs anti-ad scriptlets to stop ads served between tracks from the same media origin. Disable only if playback misbehaves."
+              @change="settingsChanged"
+            />
+
+            <div class="subsection-title">
+              Chrome Extensions
+            </div>
+
+            <YTMDSetting
+              v-model="extensionsEnabled"
+              type="checkbox"
+              name="Browser extensions"
+              description="Loads unpacked Chrome extensions (such as uBlock Origin MV2) into the YouTube Music session"
+              @change="settingsChanged"
+            />
+
+            <YTMDSetting
+              v-if="extensionsEnabled"
+              type="custom"
+              flex-column
+              indented
+              name="Installed extensions"
+              description="Electron supports Manifest V2 blockers natively. Manifest V3 blockers using declarativeNetRequest (such as uBlock Origin Lite) cannot filter traffic in Electron."
+            >
+              <div
+                v-if="userExtensions.length > 0"
+                class="extensions-grid"
+              >
+                <div
                   v-for="extension in userExtensions"
                   :key="extension.path"
+                  class="extension-card"
                 >
-                  <td class="extension">
-                    <span class="name">{{ extension.name }}</span><br>
-                    <span :class="{ status: true, error: extensionHasError(extension) }">{{ extensionStatus(extension) }}</span><br>
-                    <span class="path">{{ extension.path }}</span>
-                  </td>
-                  <td class="controls">
-                    <button @click="removeExtension(extension.path)">
-                      <span class="material-symbols-outlined">delete</span>
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div
-              v-if="userExtensions.length === 0"
-              class="no-extensions"
-            >
-              No extensions added
-            </div>
-            <p
-              v-if="extensionAddError"
-              class="extension-add-error"
-            >
-              {{ extensionAddError }}
-            </p>
-            <button
-              class="add-extension-button"
-              @click="addExtension"
-            >
-              <span class="material-symbols-outlined">create_new_folder</span>Add extension
-            </button>
-          </YTMDSetting>
-        </div>
+                  <div class="extension-main">
+                    <div class="extension-title-row">
+                      <span class="extension-name">{{ extension.name }}</span>
+                      <span
+                        class="extension-status-badge"
+                        :class="{
+                          loaded: extensionIsLoaded(extension),
+                          error: extensionHasError(extension)
+                        }"
+                      >
+                        {{ extensionStatus(extension) }}
+                      </span>
+                    </div>
+                    <span class="extension-path">{{ extension.path }}</span>
+                  </div>
+                  <button
+                    class="icon-danger-btn"
+                    title="Remove extension"
+                    @click="removeExtension(extension.path)"
+                  >
+                    <span class="material-symbols-outlined">delete</span>
+                  </button>
+                </div>
+              </div>
+              <div
+                v-else
+                class="empty-extensions"
+              >
+                No unpacked extensions added yet.
+              </div>
+              <p
+                v-if="extensionAddError"
+                class="extension-add-error"
+              >
+                {{ extensionAddError }}
+              </p>
+              <button
+                class="add-extension-button"
+                @click="addExtension"
+              >
+                <span class="material-symbols-outlined">create_new_folder</span>
+                Add unpacked extension
+              </button>
+            </YTMDSetting>
+          </div>
 
-        <div
-          v-if="currentTab === 5"
-          class="shortcuts-tab"
-        >
-          <div class="setting">
-            <p class="shortcut-title">
-              Play/Pause<span
-                v-if="shortcutsPlayPauseRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutPlayPause"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Next<span
-                v-if="shortcutsNextRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutNext"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Previous<span
-                v-if="shortcutsPreviousRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutPrevious"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Thumbs Up<span
-                v-if="shortcutsThumbsUpRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutThumbsUp"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Thumbs Down<span
-                v-if="shortcutsThumbsDownRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutThumbsDown"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Increase Volume<span
-                v-if="shortcutsVolumeUpRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutVolumeUp"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Decrease Volume<span
-                v-if="shortcutsVolumeDownRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutVolumeDown"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Mute Volume<span
-                v-if="shortcutsVolumeMuteRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutVolumeMute"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Toggle Shuffle<span
-                v-if="shortcutsToggleShuffleRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutToggleShuffle"
-              @change="settingsChanged"
-            />
-          </div>
-          <div class="setting">
-            <p class="shortcut-title">
-              Toggle Repeat<span
-                v-if="shortcutsToggleRepeatRegisterFailed"
-                class="material-symbols-outlined register-error"
-                title="Failed to register keybind. Does another application have this keybind?"
-              >error</span>
-            </p>
-            <KeybindInput
-              v-model="shortcutToggleRepeat"
-              @change="settingsChanged"
-            />
-          </div>
-        </div>
-
-        <div
-          v-if="currentTab === 99"
-          class="about-tab"
-        >
-          <img
-            class="icon"
-            :src="logo"
+          <div
+            v-if="currentTab === 1"
+            class="general-tab"
           >
-          <h2 class="app-name">
-            YTMDesktop Adblock
-          </h2>
-          <p class="made-by">
-            Made by YTMDesktop Team
-          </p>
-          <template v-if="!autoUpdaterDisabled">
-            <button
-              v-if="!updateDownloaded"
-              :disabled="!(!checkingForUpdate && !updateAvailable && !updateDownloaded)"
-              class="update-check-button"
-              @click="checkForUpdates"
-            >
-              <span class="material-symbols-outlined">update</span>Check for updates
-            </button>
-            <button
-              v-if="updateDownloaded"
-              class="update-button"
-              @click="restartApplicationForUpdate"
-            >
-              <span class="material-symbols-outlined">upgrade</span>Restart to update
-            </button>
-            <p
-              v-if="checkingForUpdate && !updateAvailable && !updateDownloaded"
-              class="updating"
-            >
-              <span class="material-symbols-outlined">progress_activity</span>Checking for updates...
-            </p>
-            <p
-              v-if="updateAvailable && !updateDownloaded"
-              class="updating"
-            >
-              <span class="material-symbols-outlined">progress_activity</span>Downloading update...
-            </p>
-            <p
-              v-if="updateNotAvailable"
-              class="no-update"
-            >
-              Update not available
-            </p>
-          </template>
-          <template v-if="autoUpdaterDisabled">
-            <button
-              disabled
-              class="update-check-button"
-            >
-              <span class="material-symbols-outlined">update</span>Check for updates
-            </button>
-            <p class="no-auto-updater">
-              Auto updater disabled
-            </p>
-            <p class="no-auto-updater">
-              Platform or build does not support automatic updates
-            </p>
-          </template>
-          <span class="version-info">
-            <p>Version: {{ ytmdVersion }}</p>
-            <p>Branch: {{ ytmdBranch ?? "None" }}</p>
-            <p>Commit: {{ ytmdCommitHash ?? "None" }}</p>
-            <div class="divider"></div>
-            <p>Electron: {{ processVersions.electron }}</p>
-            <p>Chrome: {{ processVersions.chrome }}</p>
-          </span>
-          <div class="links">
-            <a
-              href="https://github.com/oPaozinh0/ytmdesktop"
-              target="_blank"
-            >GitHub</a>
-            <a
-              href="https://ytmdesktop.github.io/"
-              target="_blank"
-            >Website</a>
+            <YTMDSetting
+              v-if="!isDarwin"
+              v-model="hideToTrayOnClose"
+              type="checkbox"
+              name="Hide to tray on close"
+              description="Minimize to the system tray instead of exiting the application"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="showNotificationOnSongChange"
+              type="checkbox"
+              name="Show notification on song change"
+              description="Display a native OS notification whenever a new track starts"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="startOnBoot"
+              type="checkbox"
+              name="Start on boot"
+              description="Automatically launch YTM Shield when signing into your system"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="disableHardwareAcceleration"
+              type="checkbox"
+              restart-required
+              name="Disable hardware acceleration"
+              description="Use software rendering if experiencing black frames or GPU artifacts"
+              @change="settingChangedRequiresRestart"
+            />
           </div>
-        </div>
-      </div>
+
+          <div
+            v-if="currentTab === 2"
+            class="appearance-tab"
+          >
+            <YTMDSetting
+              v-model="alwaysShowVolumeSlider"
+              type="checkbox"
+              name="Always show volume slider"
+              description="Applies only to the legacy player bar and may not affect newer layouts"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="customCSSEnabled"
+              type="checkbox"
+              name="Custom CSS"
+              description="Inject a personal CSS file into the YouTube Music view"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="customCSSEnabled"
+              v-model="customCSSPath"
+              type="file"
+              indented
+              bind-setting="appearance.customCSSPath"
+              name="Custom CSS file path"
+              @file-change="settingChangedFile"
+              @clear="removeCustomCSSPath"
+            />
+            <YTMDSetting
+              v-model="zoom"
+              type="range"
+              max="300"
+              min="30"
+              step="10"
+              name="Zoom"
+              description="Adjust web player scale percentage"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="isLinux"
+              v-model="trayIconStyle"
+              :options-map="{ [TrayIconStyle.Auto]: 'Auto', [TrayIconStyle.White]: 'White', [TrayIconStyle.Black]: 'Black' }"
+              type="select"
+              name="Tray icon style"
+              @change="settingsChanged"
+            />
+          </div>
+
+          <div
+            v-if="currentTab === 3"
+            class="playback-tab"
+          >
+            <YTMDSetting
+              v-model="continueWhereYouLeftOff"
+              name="Continue where you left off"
+              description="Resume your previous track or queue on startup"
+              type="checkbox"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="continueWhereYouLeftOff"
+              v-model="continueWhereYouLeftOffPaused"
+              type="checkbox"
+              indented
+              name="Pause on application launch"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="progressInTaskbar"
+              type="checkbox"
+              name="Show track progress on taskbar"
+              description="Render live playback progress on the taskbar icon"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-model="enableSpeakerFill"
+              type="checkbox"
+              restart-required
+              name="Enable speaker fill"
+              description="Enable multi-channel stereo mirroring in the audio engine"
+              @change="settingChangedRequiresRestart"
+            />
+            <YTMDSetting
+              v-model="ratioVolume"
+              type="checkbox"
+              name="Ratio volume"
+              description="Use smoother perceptual volume curve control"
+              @change="settingsChanged"
+            />
+          </div>
+
+          <div
+            v-if="currentTab === 4"
+            class="integrations-tab"
+          >
+            <YTMDSetting
+              v-model="companionServerEnabled"
+              type="checkbox"
+              name="Companion server"
+              description="Enable local API server for companion remote controllers"
+              :disabled="!safeStorageAvailable"
+              disabled-message="This integration cannot be enabled due to safeStorage being unavailable"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="companionServerEnabled && safeStorageAvailable"
+              v-model="companionServerCORSWildcardEnabled"
+              type="checkbox"
+              indented
+              name="Allow browser communication"
+              description="Warning: allows any visited website to talk to the local companion server"
+              @change="settingsChanged"
+            />
+            <YTMDSetting
+              v-if="companionServerEnabled && safeStorageAvailable"
+              v-model="companionServerAuthWindowEnabled"
+              type="checkbox"
+              indented
+              name="Enable companion authorization"
+              description="Automatically turns off after first authorization or after 5 minutes"
+              @change="memorySettingsChanged"
+            />
+            <YTMDSetting
+              v-if="companionServerEnabled && safeStorageAvailable"
+              type="custom"
+              flex-column
+              indented
+              name="Authorized companions"
+              description="Clients currently paired with your YTM Shield session"
+              @change="settingsChanged"
+            >
+              <div
+                v-if="companionServerAuthTokens.length > 0"
+                class="companions-list"
+              >
+                <div
+                  v-for="authToken in companionServerAuthTokens"
+                  :key="authToken.appId"
+                  class="companion-card"
+                >
+                  <div class="companion-info">
+                    <span class="companion-name">{{ authToken.appName }}</span>
+                    <span class="companion-meta">{{ authToken.appId }} • v{{ authToken.appVersion }}</span>
+                  </div>
+                  <button
+                    class="icon-danger-btn"
+                    title="Revoke companion access"
+                    @click="deleteCompanionAuthToken(authToken.appId)"
+                  >
+                    <span class="material-symbols-outlined">delete</span>
+                  </button>
+                </div>
+              </div>
+              <div
+                v-else
+                class="no-authorized-companions"
+              >
+                No authorized companions
+              </div>
+            </YTMDSetting>
+
+            <YTMDSetting
+              v-model="discordPresenceEnabled"
+              type="checkbox"
+              name="Discord rich presence"
+              description="Show current song and playback status on your Discord profile"
+              @change="settingsChanged"
+            />
+            <div
+              v-if="discordPresenceEnabled && discordPresenceConnectionFailed"
+              class="inline-alert-card indented"
+            >
+              <p class="discord-failure">
+                Discord connection could not be established after 30 attempts.
+              </p>
+              <button
+                class="secondary-btn"
+                @click="restartDiscordPresence"
+              >
+                Retry
+              </button>
+            </div>
+
+            <YTMDSetting
+              v-model="lastFMEnabled"
+              type="checkbox"
+              name="Last.fm scrobbling"
+              description="Automatically scrobble played tracks to Last.fm"
+              :disabled="!safeStorageAvailable"
+              disabled-message="This integration cannot be enabled due to safeStorage being unavailable"
+              @change="settingsChanged"
+            />
+            <div
+              v-if="lastFMEnabled"
+              class="inline-card indented"
+            >
+              <div class="inline-card-row">
+                <p class="inline-card-text">
+                  Authentication status:
+                  <span
+                    class="status-pill-inline"
+                    :class="lastFMSessionKey ? 'ok' : 'err'"
+                  >
+                    {{ lastFMSessionKey ? "Authenticated" : "Not Connected" }}
+                  </span>
+                </p>
+                <button
+                  v-if="lastFMSessionKey"
+                  class="secondary-btn"
+                  @click="logoutLastFM"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="lastFMEnabled && lastFMAuthenticationStep === 0"
+              class="inline-card indented"
+            >
+              <div class="inline-card-row">
+                <p class="inline-card-text">
+                  Continue Last.fm setup in your browser, then return here.
+                </p>
+                <button
+                  class="primary-btn-sm"
+                  @click="stepLastFMAuth"
+                >
+                  Authorize Last.fm
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="lastFMEnabled && lastFMAuthenticationStep === 1"
+              class="inline-card indented"
+            >
+              <div class="inline-card-row">
+                <p class="inline-card-text">
+                  Once approved in your browser, complete authentication below.
+                </p>
+                <button
+                  class="primary-btn-sm"
+                  @click="stepLastFMAuth"
+                >
+                  Finish authentication
+                </button>
+              </div>
+            </div>
+            <YTMDSetting
+              v-if="lastFMEnabled"
+              v-model="scrobblePercent"
+              indented
+              type="range"
+              name="Scrobble percent"
+              description="Track percentage listened before sending a scrobble"
+              min="50"
+              max="95"
+              step="5"
+              @change="settingsChanged"
+            />
+
+            <YTMDSetting
+              v-model="enhancedMediaServiceEnabled"
+              type="checkbox"
+              restart-required
+              name="Enhanced media service"
+              description="Improved OS hardware media key integration"
+              :disabled="isDarwin"
+              disabled-message="This integration is not available on macOS"
+              beta
+              @change="settingChangedRequiresRestart"
+            />
+          </div>
+
+          <div
+            v-if="currentTab === 5"
+            class="shortcuts-tab"
+          >
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Play / Pause
+                </p>
+                <span
+                  v-if="shortcutsPlayPauseRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind. Another application may already hold it."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutPlayPause"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Next Track
+                </p>
+                <span
+                  v-if="shortcutsNextRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutNext"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Previous Track
+                </p>
+                <span
+                  v-if="shortcutsPreviousRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutPrevious"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Thumbs Up
+                </p>
+                <span
+                  v-if="shortcutsThumbsUpRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutThumbsUp"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Thumbs Down
+                </p>
+                <span
+                  v-if="shortcutsThumbsDownRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutThumbsDown"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Increase Volume
+                </p>
+                <span
+                  v-if="shortcutsVolumeUpRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutVolumeUp"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Decrease Volume
+                </p>
+                <span
+                  v-if="shortcutsVolumeDownRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutVolumeDown"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Mute Volume
+                </p>
+                <span
+                  v-if="shortcutsVolumeMuteRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutVolumeMute"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Toggle Shuffle
+                </p>
+                <span
+                  v-if="shortcutsToggleShuffleRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutToggleShuffle"
+                @change="settingsChanged"
+              />
+            </div>
+
+            <div class="shortcut-card">
+              <div class="shortcut-info">
+                <p class="shortcut-title">
+                  Toggle Repeat
+                </p>
+                <span
+                  v-if="shortcutsToggleRepeatRegisterFailed"
+                  class="shortcut-error-badge"
+                  title="Failed to register keybind."
+                >Conflict</span>
+              </div>
+              <KeybindInput
+                v-model="shortcutToggleRepeat"
+                @change="settingsChanged"
+              />
+            </div>
+          </div>
+
+          <div
+            v-if="currentTab === 99"
+            class="about-tab"
+          >
+            <div class="about-hero">
+              <ShieldLogo
+                :size="72"
+                glow
+              />
+              <h2 class="app-name">
+                YTM Shield
+              </h2>
+              <p class="about-tagline">
+                Modern YouTube Music desktop player with integrated Ad Shield
+              </p>
+              <p class="made-by">
+                Created &amp; maintained by <span>oPaozinh0</span>
+              </p>
+            </div>
+
+            <div class="about-update-card">
+              <template v-if="!autoUpdaterDisabled">
+                <button
+                  v-if="!updateDownloaded"
+                  :disabled="checkingForUpdate || updateAvailable || updateDownloaded"
+                  class="update-check-button"
+                  @click="checkForUpdates"
+                >
+                  <span class="material-symbols-outlined">update</span>
+                  Check for updates
+                </button>
+                <button
+                  v-if="updateDownloaded"
+                  class="update-ready-button"
+                  @click="restartApplicationForUpdate"
+                >
+                  <span class="material-symbols-outlined">upgrade</span>
+                  Restart to install update
+                </button>
+                <p
+                  v-if="checkingForUpdate && !updateAvailable && !updateDownloaded"
+                  class="update-status"
+                >
+                  <span class="material-symbols-outlined spinning">progress_activity</span>
+                  Checking for updates...
+                </p>
+                <p
+                  v-if="updateAvailable && !updateDownloaded"
+                  class="update-status"
+                >
+                  <span class="material-symbols-outlined spinning">progress_activity</span>
+                  Downloading update...
+                </p>
+                <p
+                  v-if="updateNotAvailable"
+                  class="update-status muted"
+                >
+                  You are running the latest version
+                </p>
+              </template>
+              <template v-else>
+                <p class="update-status muted">
+                  Auto updater disabled for this build or platform
+                </p>
+              </template>
+            </div>
+
+            <div class="version-grid">
+              <div class="version-cell">
+                <span class="cell-label">App Version</span>
+                <span class="cell-value">v{{ ytmdVersion }}</span>
+              </div>
+              <div class="version-cell">
+                <span class="cell-label">Branch</span>
+                <span class="cell-value">{{ ytmdBranch ?? "release" }}</span>
+              </div>
+              <div class="version-cell">
+                <span class="cell-label">Commit</span>
+                <span class="cell-value">{{ ytmdCommitHash ?? "packaged" }}</span>
+              </div>
+              <div class="version-cell">
+                <span class="cell-label">Electron</span>
+                <span class="cell-value">{{ processVersions.electron }}</span>
+              </div>
+              <div class="version-cell">
+                <span class="cell-label">Chromium</span>
+                <span class="cell-value">{{ processVersions.chrome }}</span>
+              </div>
+            </div>
+
+            <div class="about-links">
+              <a
+                class="about-link-btn"
+                href="https://github.com/oPaozinh0/ytmdesktop"
+                target="_blank"
+              >
+                <span class="material-symbols-outlined">code</span>
+                GitHub Repository
+              </a>
+              <a
+                class="about-link-btn"
+                href="https://github.com/oPaozinh0/ytmdesktop/issues"
+                target="_blank"
+              >
+                <span class="material-symbols-outlined">bug_report</span>
+                Report an Issue
+              </a>
+            </div>
+          </div>
+        </template>
+      </main>
     </div>
   </div>
 </template>
@@ -1050,6 +1381,8 @@ function stepLastFMAuth() {
 <style scoped>
 .settings-container {
   user-select: none;
+  height: 100%;
+  width: 100%;
 }
 
 .content-container {
@@ -1057,382 +1390,872 @@ function stepLastFMAuth() {
   height: 100%;
 }
 
-.content {
-  overflow: auto;
-  flex-grow: 1;
-  padding: 4px 16px;
-}
-
-.content::-webkit-scrollbar {
-  width: 12px;
-}
-
-.content::-webkit-scrollbar-track {
-  background: #212121;
-}
-
-.content::-webkit-scrollbar-thumb {
-  background-color: #414141;
-}
-
+/* Sidebar */
 .sidebar {
-  width: 25%;
-  min-width: 25%;
-  list-style-type: none;
-  margin: unset;
-  padding: unset;
+  width: 230px;
+  min-width: 230px;
   height: 100%;
-  border-right: 1px solid #212121;
+  background: rgba(14, 15, 22, 0.92);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
+  padding: 16px 12px 12px;
+  box-sizing: border-box;
+  gap: 14px;
 }
 
-.sidebar li {
+.sidebar-brand {
   display: flex;
   align-items: center;
-  padding: 16px;
-  cursor: pointer;
-  color: #bbbbbb;
+  gap: 10px;
+  padding: 2px 6px;
 }
 
-.sidebar li .material-symbols-outlined {
-  font-size: 28px;
+.sidebar-brand-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-brand-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.sidebar-brand-version {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-search:focus-within {
+  border-color: var(--accent-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.search-icon {
+  font-size: 17px;
+  color: var(--text-muted);
+}
+
+.search-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.search-clear .material-symbols-outlined {
+  font-size: 15px;
+}
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.nav-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.nav-list li:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.nav-list li.active {
+  background: var(--accent-soft);
+  border-color: rgba(255, 31, 75, 0.32);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nav-list li .material-symbols-outlined {
+  font-size: 20px;
   font-variation-settings:
     "FILL" 0,
-    "wght" 100,
+    "wght" 350,
     "GRAD" 0,
-    "opsz" 28;
+    "opsz" 20;
 }
 
-.sidebar li:hover {
-  background-color: #111111;
+.nav-list li.active .material-symbols-outlined {
+  color: var(--accent-primary);
+  font-variation-settings:
+    "FILL" 1,
+    "wght" 400,
+    "GRAD" 0,
+    "opsz" 20;
 }
 
-.sidebar li.active {
-  background-color: #212121;
-  color: #eeeeee;
+.nav-label {
+  flex: 1;
 }
 
-.sidebar li .material-symbols-outlined {
-  margin-right: 8px;
+.nav-shield-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
 }
 
-.sidebar .push {
-  flex-grow: 1;
+.nav-shield-dot.ok {
+  background: var(--shield-ok);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
 }
 
-.setting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.nav-shield-dot.err {
+  background: var(--shield-error);
 }
 
-.setting.indented {
-  margin-left: 12px;
-  padding-left: 12px;
-  border-left: 1px solid #212121;
+.push {
+  flex: 1;
 }
 
-.name-with-description .name {
-  margin-bottom: unset;
+/* Main Content */
+.content {
+  overflow-y: auto;
+  flex: 1;
+  padding: 24px 28px 32px;
+  box-sizing: border-box;
 }
 
-.name-with-description .description {
-  margin-top: 4px;
-  color: #969696;
+.section-header {
+  margin-bottom: 18px;
 }
 
-.about-tab {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-direction: column;
-  height: 100%;
+.section-header h1 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+  letter-spacing: -0.02em;
 }
 
-.icon {
-  width: 128px;
-  height: 128px;
-  margin-bottom: 16px;
-}
-
-.app-name {
+.section-header p {
+  font-size: 13px;
+  color: var(--text-secondary);
   margin: 0;
 }
 
-.version-info p {
-  margin: 4px 0;
-  color: #bbbbbb;
+.subsection-title {
+  margin: 22px 0 10px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
 }
 
-.version-info .divider {
-  background-color: #414141;
-  height: 1px;
-  margin: 8px 0;
-}
-
-.made-by {
-  margin: 16px 0;
-}
-
-.links {
-  margin-top: 32px;
-  width: 100%;
-  display: flex;
-  justify-content: space-evenly;
-}
-
-.links a {
-  color: #bbbbbb;
-}
-
+/* Restart Banner */
 .restart-banner {
-  background-color: #f44336;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, rgba(255, 31, 75, 0.16), rgba(20, 22, 30, 0.85));
+  border: 1px solid rgba(255, 31, 75, 0.38);
 }
 
 .restart-banner .message {
   display: flex;
   align-items: center;
-}
-
-.restart-banner .message .material-symbols-outlined {
-  margin: 0 8px;
-}
-
-.restart-banner .restart-button {
-  margin: 0 8px;
-  background-color: transparent;
-  border: 1px solid #ffffff;
-  border-radius: 4px;
-  padding: 8px 16px;
-  cursor: pointer;
-}
-
-.update-check-button {
-  display: flex;
-  align-items: center;
-  background-color: transparent;
-  border: 1px solid #ffffff;
-  border-radius: 4px;
-  padding: 4px 8px;
-  margin-bottom: 8px;
-  cursor: pointer;
-}
-
-.update-check-button:disabled {
-  border: 1px solid #888888;
-  cursor: not-allowed;
-}
-
-.updating,
-.no-update {
-  display: flex;
-  align-items: center;
-  color: #888888;
-  margin: 0 0 8px 0;
-}
-
-.no-auto-updater {
-  display: flex;
-  align-items: center;
-  color: #888888;
-  margin: 0 0 8px 0;
-}
-
-.updating .material-symbols-outlined {
-  animation: rotation 1s infinite linear;
-}
-
-@keyframes rotation {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(359deg);
-  }
-}
-
-.update-button {
-  display: flex;
-  align-items: center;
-  background-color: #f44336;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  margin-bottom: 8px;
-  cursor: pointer;
-}
-
-.update-check-button .material-symbols-outlined,
-.updating .material-symbols-outlined,
-.update-button .material-symbols-outlined {
-  margin-right: 4px;
-}
-
-.version-info {
-  user-select: text;
-}
-
-.setting.disabled {
-  color: #c6c6c6;
-}
-
-.authorized-companions-table {
-  width: 100%;
-  table-layout: fixed;
-}
-
-.authorized-companions-table tr .companion {
-  width: 70%;
-  word-wrap: break-word;
-}
-
-.authorized-companions-table tr .companion .id {
-  color: #969696;
-  font-size: 14px;
-}
-
-.authorized-companions-table tbody tr .version {
-  word-wrap: break-word;
-}
-
-.authorized-companions-table tr th,
-.authorized-companions-table tr td {
-  padding: 4px;
-}
-
-.authorized-companions-table th {
-  text-align: left;
-}
-
-.authorized-companions-table thead tr th {
-  border-bottom: 1px solid #212121;
-}
-.authorized-companions-table thead tr .controls {
-  width: 48px;
-}
-
-.authorized-companions-table tbody button {
-  border-radius: 4px;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  background-color: #212121;
-  cursor: pointer;
-  border: none;
-}
-
-.no-authorized-companions {
-  color: #bbbbbb;
-  padding: 4px;
-}
-
-.discord-failure {
+  gap: 8px;
   margin: 0;
-  color: #969696;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-.adblock-status {
-  margin: 0;
-  color: #969696;
-}
-
-.adblock-status.error {
-  color: #f44336;
-}
-
-.extensions-table {
-  width: 100%;
-  table-layout: fixed;
-}
-
-.extensions-table tr .extension {
-  width: 100%;
-  word-wrap: break-word;
-}
-
-.extensions-table tr .extension .status {
-  color: #969696;
-  font-size: 14px;
-}
-
-.extensions-table tr .extension .status.error {
-  color: #f44336;
-}
-
-.extensions-table tr .extension .path {
-  color: #6e6e6e;
+.restart-button {
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent-primary);
+  color: #ffffff;
   font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.extensions-table tr th,
-.extensions-table tr td {
-  padding: 4px;
+.restart-button:hover {
+  background: var(--accent-hover);
 }
 
-.extensions-table th {
-  text-align: left;
-}
-
-.extensions-table thead tr th {
-  border-bottom: 1px solid #212121;
-}
-
-.extensions-table thead tr .controls {
-  width: 48px;
-}
-
-.extensions-table tbody button {
-  border-radius: 4px;
-  padding: 4px;
+/* Ad Shield Hero */
+.shield-hero {
   display: flex;
   align-items: center;
-  background-color: #212121;
-  cursor: pointer;
-  border: none;
+  justify-content: space-between;
+  padding: 20px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(255, 31, 75, 0.12) 0%, rgba(20, 22, 30, 0.9) 55%);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-elevated);
 }
 
-.no-extensions {
-  color: #bbbbbb;
-  padding: 4px;
+.shield-hero.active {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(20, 22, 30, 0.92) 50%, rgba(255, 31, 75, 0.08) 100%);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.shield-hero.error {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.16) 0%, rgba(20, 22, 30, 0.92) 60%);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.shield-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.shield-emblem-box {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.shield-hero-text h2 {
+  margin: 6px 0 4px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.shield-hero-text p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.hero-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+.hero-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.shield-hero.active .hero-dot {
+  background: var(--shield-ok);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+}
+
+.shield-hero.error .hero-dot {
+  background: var(--shield-error);
+}
+
+/* Protection Summary Strip */
+.protection-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.strip-card {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.strip-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.strip-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.strip-value.on {
+  color: #4ade80;
+}
+
+/* Chrome Extensions Cards */
+.extensions-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extension-card,
+.companion-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+}
+
+.extension-main,
+.companion-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.extension-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.extension-name,
+.companion-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.extension-status-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.extension-status-badge.loaded {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.extension-status-badge.error {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+.extension-path,
+.companion-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.empty-extensions,
+.no-authorized-companions {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
 }
 
 .extension-add-error {
-  color: #f44336;
-  margin: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: #f87171;
 }
 
 .add-extension-button {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 31, 75, 0.42);
+  background: var(--accent-soft);
+  color: #ff7a93;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.add-extension-button:hover {
+  background: rgba(255, 31, 75, 0.24);
+  border-color: var(--accent-primary);
 }
 
 .add-extension-button .material-symbols-outlined {
-  margin-right: 4px;
+  font-size: 17px;
+}
+
+.icon-danger-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.icon-danger-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.icon-danger-btn .material-symbols-outlined {
   font-size: 18px;
 }
 
-button {
-  margin: 3px 3px 3px 4px;
-  border-radius: 4px;
-  padding: 8px;
+.companions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Inline Cards (Last.fm / Discord) */
+.inline-card,
+.inline-alert-card {
+  padding: 13px 16px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.inline-card.indented,
+.inline-alert-card.indented {
+  margin-left: 16px;
+  border-left: 2px solid rgba(255, 31, 75, 0.42);
+}
+
+.inline-card-row {
   display: flex;
   align-items: center;
-  background-color: #212121;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inline-card-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.discord-failure {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: #f87171;
+}
+
+.status-pill-inline {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-pill-inline.ok {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+}
+
+.status-pill-inline.err {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+.secondary-btn,
+.primary-btn-sm {
+  padding: 7px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+}
+
+.secondary-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.primary-btn-sm {
+  background: var(--accent-primary);
   border: none;
+  color: #ffffff;
 }
 
-.shortcuts-tab .shortcut-title {
+.primary-btn-sm:hover {
+  background: var(--accent-hover);
+}
+
+/* Shortcuts */
+.shortcuts-tab {
   display: flex;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.shortcuts-tab .shortcut-title .register-error {
-  margin-left: 4px;
-  color: #f44336;
+.shortcut-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.shortcut-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shortcut-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.shortcut-error-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+/* Search Results */
+.search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.search-card {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.search-card:hover {
+  background: var(--bg-surface-hover);
+  border-color: rgba(255, 31, 75, 0.35);
+}
+
+.search-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.search-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.search-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.search-card-tab {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ff7a93;
+  background: var(--accent-soft);
+  padding: 3px 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.empty-search {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: var(--text-muted);
+}
+
+.empty-search .material-symbols-outlined {
+  font-size: 36px;
+}
+
+/* About Tab */
+.about-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 0 24px;
+}
+
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.app-name {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.about-tagline {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.made-by {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.made-by span {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.about-update-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.update-check-button,
+.update-ready-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-check-button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.update-check-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.update-check-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.update-ready-button {
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.update-status {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.update-status.muted {
+  color: var(--text-muted);
+}
+
+.spinning {
+  font-size: 16px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.version-grid {
+  width: 100%;
+  max-width: 520px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.version-cell {
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cell-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.cell-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.about-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.about-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 15px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.about-link-btn:hover {
+  background: var(--accent-soft);
+  border-color: rgba(255, 31, 75, 0.35);
+}
+
+.about-link-btn .material-symbols-outlined {
+  font-size: 16px;
 }
 </style>

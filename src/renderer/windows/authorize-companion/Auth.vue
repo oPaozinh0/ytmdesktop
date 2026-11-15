@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeMount, ref } from "vue";
+import ShieldLogo from "../../components/ShieldLogo.vue";
 
 const appName = ref("");
 const code = ref("");
@@ -20,19 +21,23 @@ onBeforeMount(async () => {
 
 <template>
   <div class="container-wrapper">
-    <div class="container">
+    <div class="auth-card">
+      <ShieldLogo
+        :size="48"
+        glow
+      />
       <h1 class="title">
-        Companion Authorization Request
+        Companion Authorization
       </h1>
       <p class="subtitle">
-        <b>{{ appName }}</b> would like to control YTMDesktop Adblock
+        <b>{{ appName }}</b> is requesting permission to control YTM Shield
       </p>
       <p class="code-confirm">
-        Please ensure the code below matches what <b>{{ appName }}</b> is showing
+        Verify that the pairing code matches what <b>{{ appName }}</b> displays:
       </p>
-      <p class="code">
+      <div class="code-box">
         {{ code }}
-      </p>
+      </div>
       <div class="buttons">
         <button
           class="deny"
@@ -44,7 +49,7 @@ onBeforeMount(async () => {
           class="allow"
           @click="allowCompanion"
         >
-          Allow
+          Allow Access
         </button>
       </div>
     </div>
@@ -55,73 +60,105 @@ onBeforeMount(async () => {
 .container-wrapper {
   width: 100%;
   height: calc(100% - 36px);
-  background-color: #000000;
+  background:
+    radial-gradient(460px 300px at 50% 25%, rgba(255, 31, 75, 0.14), transparent 72%),
+    var(--bg-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 28px 32px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-elevated);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
-}
-
-.container {
-  padding: 8%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-}
-
-.title,
-.subtitle,
-.code-confirm,
-.code {
-  margin: unset;
   text-align: center;
+  gap: 10px;
 }
 
 .title {
-  margin-bottom: 16px;
-  font-size: 36px;
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 .subtitle {
-  font-weight: normal;
-  font-size: 20px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
 }
 
 .code-confirm {
-  margin-top: 32px;
-  font-size: 20px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
-.code {
-  margin-top: 16px;
-  font-size: 36px;
-  color: #f44336;
+.code-box {
+  margin: 6px 0 10px;
+  padding: 12px 28px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 31, 75, 0.12);
+  border: 1px solid rgba(255, 31, 75, 0.38);
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: #ff6e89;
+  box-shadow: 0 0 24px rgba(255, 31, 75, 0.18);
 }
 
 .buttons {
-  margin-top: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
 }
 
 .allow,
 .deny {
-  background: unset;
-  border: 1px solid #212121;
-  padding: 16px 32px;
-  margin-right: 32px;
-  border-radius: 4px;
+  padding: 10px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 600;
   cursor: pointer;
-}
-
-.allow:hover {
-  background-color: #212121;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
 .deny {
-  background-color: #d32f2f;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .deny:hover {
-  background-color: #c62828;
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+.allow {
+  background: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.allow:hover {
+  background: var(--accent-hover);
 }
 </style>

@@ -1,17 +1,80 @@
 @font-face {
-  font-family: 'Open Sans';
-  src: url("./fonts/OpenSans-VariableFont_wdth,wght.ttf") format('truetype');
+  font-family: "Open Sans";
+  src: url("./fonts/OpenSans-VariableFont_wdth,wght.ttf") format("truetype");
 }
 
 @font-face {
-  font-family: 'Work Sans';
-  src: url("./fonts/WorkSans-VariableFont_wght.ttf") format('truetype');
+  font-family: "Work Sans";
+  src: url("./fonts/WorkSans-VariableFont_wght.ttf") format("truetype");
 }
 
-html, body, #app {
+:root {
+  --bg-base: #0b0c10;
+  --bg-elevated: #11131a;
+  --bg-surface: rgba(20, 22, 30, 0.78);
+  --bg-surface-hover: rgba(30, 33, 45, 0.88);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-accent: rgba(255, 31, 75, 0.4);
+  --accent-primary: #ff1f4b;
+  --accent-hover: #ff3860;
+  --accent-soft: rgba(255, 31, 75, 0.14);
+  --accent-gradient: linear-gradient(135deg, #ff1f4b 0%, #d90429 100%);
+  --shield-ok: #10b981;
+  --shield-warn: #f59e0b;
+  --text-primary: #f4f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #646b78;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
   margin: 0;
   height: 100%;
-  color: #EEEEEE;
-  font-family: 'Work Sans', sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Work Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
 }

@@ -134,6 +134,8 @@ export type MemoryStoreSchema = {
 
   appLoadingStatus: string;
 
+  settingsInitialTab: number | null;
+
   lastFMAuthenticationStep: number;
   lastFMToken: string;
 

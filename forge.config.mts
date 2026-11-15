@@ -44,6 +44,7 @@ const config: ForgeConfig = {
       // Installs to its own %LocalAppData% folder so it can sit alongside the upstream app
       name: "ytmdesktop-adblock",
       setupExe: `YTMDesktop-Adblock-${packageJson.version}-Setup.exe`,
+      setupIcon: "src/assets/icons/ytmd.ico",
       iconUrl: `https://raw.githubusercontent.com/${process.env.YTMD_UPDATE_FEED_OWNER ?? "oPaozinh0"}/ytmdesktop/137c4e5c175c8c125cbcca9a5312611f80cd3bd9/src/assets/icons/ytmd.ico`
     }),
     new MakerZIP({}, ['darwin']),

@@ -8,7 +8,9 @@ import log from "electron-log";
 export default class MemoryStore<T extends Record<string, unknown>> extends Service {
   public static override readonly dependencies: DependencyConstructor<Service>[] = [AppWindowManager];
 
-  private state: Record<string, unknown> = {};
+  private state: Record<string, unknown> = {
+    settingsInitialTab: null
+  };
   private eventEmitter = new EventEmitter();
 
   public override onPreInitialized() {}

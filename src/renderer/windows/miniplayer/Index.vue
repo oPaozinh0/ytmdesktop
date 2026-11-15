@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import Miniplayer from "./Miniplayer.vue";
+import ShieldLogo from "../../components/ShieldLogo.vue";
 
 const isWayland = ref(window.ytmd.isWayland());
 const alwaysOnTop = ref(true);
@@ -19,67 +20,129 @@ function pinUnpinMiniplayer() {
 </script>
 
 <template>
-  <div class="topbar">
-    <div class="backdrop" />
-    <div class="button-container">
-      <button
-        class="pin"
-        :title="!isWayland ? `Pin/Unpin Miniplayer` : `Use your native window manager to pin the miniplayer`"
-        @click="pinUnpinMiniplayer"
-        :disabled="isWayland"
-      >
-        <span
-          v-if="alwaysOnTop"
-          class="icon material-symbols-outlined"
-        >keep</span>
-        <span
-          v-if="!alwaysOnTop"
-          class="icon material-symbols-outlined"
-        >keep_off</span>
-      </button>
-      <button
-        class="pip-exit"
-        title="Close Miniplayer"
-        @click="closeMiniplayer"
-      >
-        <span class="icon material-symbols-outlined">pip_exit</span>
-      </button>
+  <div class="miniplayer-root">
+    <div class="topbar">
+      <div class="topbar-brand">
+        <ShieldLogo :size="15" />
+        <span>YTM Shield</span>
+      </div>
+      <div class="button-container">
+        <button
+          class="top-btn pin"
+          :class="{ pinned: alwaysOnTop }"
+          :title="!isWayland ? 'Pin/Unpin Miniplayer' : 'Use your native window manager to pin the miniplayer'"
+          :disabled="isWayland"
+          @click="pinUnpinMiniplayer"
+        >
+          <span class="icon material-symbols-outlined">
+            {{ alwaysOnTop ? "keep" : "keep_off" }}
+          </span>
+        </button>
+        <button
+          class="top-btn pip-exit"
+          title="Return to main player"
+          @click="closeMiniplayer"
+        >
+          <span class="icon material-symbols-outlined">pip_exit</span>
+        </button>
+      </div>
     </div>
+    <Suspense>
+      <Miniplayer />
+    </Suspense>
   </div>
-  <Suspense>
-    <Miniplayer />
-  </Suspense>
 </template>
 
 <style scoped>
+.miniplayer-root {
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg-base);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .topbar {
   height: 36px;
+  padding: 0 8px 0 10px;
   display: flex;
-  justify-content: right;
+  align-items: center;
+  justify-content: space-between;
   position: relative;
+  z-index: 20;
+  background: linear-gradient(180deg, rgba(11, 12, 16, 0.72) 0%, rgba(11, 12, 16, 0) 100%);
+  flex-shrink: 0;
 }
 
-.topbar .backdrop {
-  position: absolute;
-  width: 100%;
-  height: 200%;
-  top: -100%;
-  backdrop-filter: blur(10px);
-  mask-image: linear-gradient(to bottom, black 0%, black 25%, transparent 100%);
-  z-index: -888;
-  background-color: rgba(0, 0, 0, 0.75);
+.topbar-brand {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.85;
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
-.topbar button {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  width: 36px;
-  height: 36px;
+.topbar-brand span {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(244, 244, 246, 0.88);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
+}
+
+.button-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   -webkit-app-region: no-drag;
+  pointer-events: auto;
 }
 
-.topbar .icon {
-  font-size: 20px;
+.top-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 16, 22, 0.72);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.top-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}
+
+.top-btn.pinned {
+  color: #ff6e89;
+  border-color: rgba(255, 31, 75, 0.35);
+}
+
+.top-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.top-btn .icon {
+  font-size: 17px;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  font-variation-settings:
+    "FILL" 0,
+    "wght" 350,
+    "GRAD" 0,
+    "opsz" 20;
 }
 </style>

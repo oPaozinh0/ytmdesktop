@@ -5,6 +5,25 @@ import { getYTMTextRun } from "../utils";
 export default function init() {
   const remoteApi = protectedapimanager.createOrGetAPI("RemoteControl");
 
+  const gestureQueue: Array<() => void> = [];
+  (window as any).__YTMD_RUN_GESTURE_QUEUE__ = () => {
+    while (gestureQueue.length > 0) {
+      const task = gestureQueue.shift();
+      try {
+        task?.();
+      } catch (err) {
+        console.error("[ytmd-err(userGestureTask)]", err);
+      }
+    }
+  };
+
+  const runWithUserGesture = (fn: () => void) => {
+    gestureQueue.push(fn);
+    window.postMessage({ op: "ytmd-user-gesture" }, "/");
+  };
+
+  let playbackAttemptId = 0;
+
   remoteApi.addEventListener("execute", (event: any) => {
     const args = event.detail.args;
     const command = args.shift();
@@ -12,38 +31,115 @@ export default function init() {
     const ytmStore = ytmhook.ytmStateStore.store;
     const playerApi = ytmhook.ytmPlayerController.playerApi;
 
+    const PLAYER_BAR_PLAY_SELECTOR =
+      "ytmusic-player-bar #play-pause-button, ytmusic-player-bar tp-yt-paper-icon-button#play-pause-button, ytmusic-player-bar yt-icon-button#play-pause-button";
+
+    const triggerPlaybackFallback = () => {
+      const playerBarPlayBtn = document.querySelector(PLAYER_BAR_PLAY_SELECTOR) as HTMLElement | null;
+      if (playerBarPlayBtn) {
+        playerBarPlayBtn.click();
+        return;
+      }
+      const homePlayBtn = document.querySelector(
+        "ytmusic-play-button-renderer#play-button, ytmusic-item-thumbnail-overlay-renderer ytmusic-play-button-renderer"
+      ) as HTMLElement | null;
+      homePlayBtn?.click();
+    };
+
+    const isPlayingOrBuffering = () => {
+      const state = playerApi.getPlayerState();
+      return state === 1 || state === 3;
+    };
+
+    const startPlaybackReliable = () => {
+      const attemptId = ++playbackAttemptId;
+      runWithUserGesture(() => {
+        if (attemptId !== playbackAttemptId) return;
+
+        const videoId = playerApi.getPlayerResponse()?.videoDetails?.videoId;
+        if (!videoId) {
+          triggerPlaybackFallback();
+          return;
+        }
+
+        playerApi.playVideo();
+
+        setTimeout(() => {
+          if (attemptId !== playbackAttemptId || isPlayingOrBuffering()) return;
+
+          runWithUserGesture(() => {
+            if (attemptId !== playbackAttemptId || isPlayingOrBuffering()) return;
+
+            const playerBarBtn = document.querySelector(PLAYER_BAR_PLAY_SELECTOR) as HTMLElement | null;
+            playerBarBtn?.click();
+
+            setTimeout(() => {
+              if (attemptId !== playbackAttemptId || isPlayingOrBuffering()) return;
+
+              runWithUserGesture(() => {
+                if (attemptId !== playbackAttemptId || isPlayingOrBuffering()) return;
+
+                const playlistId = playerApi.getPlaylistId() || undefined;
+                document.dispatchEvent(
+                  new CustomEvent("yt-navigate", {
+                    detail: {
+                      endpoint: {
+                        watchEndpoint: {
+                          videoId,
+                          playlistId
+                        }
+                      }
+                    }
+                  })
+                );
+                playerApi.playVideo();
+              });
+            }, 220);
+          });
+        }, 200);
+      });
+    };
+
     switch (command) {
       case "playPause": {
         // 1 = Playing
         if (playerApi.getPlayerState() === 1) {
+          playbackAttemptId++;
           playerApi.pauseVideo();
         } else {
-          playerApi.playVideo();
+          startPlaybackReliable();
         }
 
         break;
       }
 
       case "play": {
-        playerApi.playVideo();
+        startPlaybackReliable();
 
         break;
       }
 
       case "pause": {
+        playbackAttemptId++;
         playerApi.pauseVideo();
 
         break;
       }
 
       case "next": {
-        playerApi.nextVideo();
+        playbackAttemptId++;
+        runWithUserGesture(() => {
+          playerApi.nextVideo();
+        });
 
         break;
       }
 
       case "previous": {
-        playerApi.previousVideo();
+        playbackAttemptId++;
+        runWithUserGesture(() => {
+          playerApi.previousVideo();
+        });
 
         break;
       }
@@ -358,16 +454,19 @@ export default function init() {
                 .playlistPanelVideoRenderer;
           }
 
-          document.dispatchEvent(
-            new CustomEvent("yt-navigate", {
-              detail: {
-                endpoint: {
-                  watchEndpoint:
-                    playlistPanelVideoRenderer.navigationEndpoint.watchEndpoint,
+          playbackAttemptId++;
+          runWithUserGesture(() => {
+            document.dispatchEvent(
+              new CustomEvent("yt-navigate", {
+                detail: {
+                  endpoint: {
+                    watchEndpoint:
+                      playlistPanelVideoRenderer.navigationEndpoint.watchEndpoint,
+                  },
                 },
-              },
-            }),
-          );
+              }),
+            );
+          });
         }
 
         break;

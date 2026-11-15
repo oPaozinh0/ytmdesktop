@@ -91,7 +91,9 @@ export default function init() {
 
   async function sendVideoData() {
     const state = ytmStore.getState();
-    const videoDetails = structuredClone(playerApi.getPlayerResponse().videoDetails);
+    const playerResponse = playerApi.getPlayerResponse();
+    if (!playerResponse?.videoDetails?.videoId) return;
+    const videoDetails = structuredClone(playerResponse.videoDetails);
     const playlistId = playerApi.getPlaylistId();
     let album: any | null = null;
     let hasFullMetadata = false;

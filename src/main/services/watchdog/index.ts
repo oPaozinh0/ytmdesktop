@@ -82,7 +82,7 @@ export default class WatchDog extends Service {
           `${error.stack}`;
 
         if (!app.isReady()) {
-          dialog.showErrorBox(`YTMDesktop Adblock Crashed`, `Application crashed before ready\n\n${dialogMessage}`);
+          dialog.showErrorBox(`YTM Shield Crashed`, `Application crashed before ready\n\n${dialogMessage}`);
         } else {
           const options = ["Copy to Clipboard and Exit", "Exit"];
           if (!app.isPackaged) {
@@ -91,7 +91,7 @@ export default class WatchDog extends Service {
 
           result = dialog.showMessageBoxSync({
             title: "Error",
-            message: "YTMDesktop Adblock Crashed",
+            message: "YTM Shield Crashed",
             detail: dialogMessage,
             type: "error",
             buttons: options
@@ -99,7 +99,7 @@ export default class WatchDog extends Service {
 
           // Copy to Clipboard
           if (result === 0 || result === 2) {
-            clipboard.writeText(`YTMDesktop Adblock Crashed\n\n${dialogMessage}`);
+            clipboard.writeText(`YTM Shield Crashed\n\n${dialogMessage}`);
           }
         }
 

@@ -1,182 +1,103 @@
-# YouTube Music Desktop App
-### Now with a Fresh new Codebase 😉
+<div align="center">
 
-> **This is a fork of [ytmdesktop/ytmdesktop](https://github.com/ytmdesktop/ytmdesktop)** with ad blocking added. See [Ad blocking](#ad-blocking) below.
+# YTM Shield
 
-![YouTube Music Desktop App](.github/images/readme_main_app.png)
+**Modern dark-glass YouTube Music desktop player with integrated Ad Shield and Chrome extension support.**
 
-[![Discord][discord-img]][discord-url]
-[![Gitmoji][gitmoji-img]][gitmoji-url]
-[![GitHub license][license-img]][license-url]
 [![GitHub release][release-img]][release-url]
-[![Download][download-img]][download-url]
+[![GitHub downloads][download-img]][download-url]
+[![GitHub license][license-img]][license-url]
 
-<!--
-TODO: Write guides for v2. While these may still be helpful they are geared towards v1
-#### 📖 Guide:
-1. [How to use](https://github.com/ytmdesktop/ytmdesktop/wiki/How-use)
-2. [FAQ](https://github.com/ytmdesktop/ytmdesktop/wiki/FAQ)
--->
+</div>
 
-# ⬇️ Download at
-<a href="https://repology.org/project/ytmdesktop/versions">
-	<img type="image/svg" align="right" src="https://repology.org/badge/vertical-allrepos/ytmdesktop.svg" alt="Packaging status"/>
-</a>
+---
 
-#### Windows
-<!--
-### UPDATE THESE PLATFORMS ###
-- Chocolatey: ```choco install ytmdesktop```
--->
-- Winget: ```winget install "YouTube Music Desktop App"``` or ```winget install Ytmdesktop.Ytmdesktop```
-- Scoop: ```scoop bucket add extras``` then ```scoop install ytmdesktop``` (Community Maintained)
-- Binaries: <https://github.com/ytmdesktop/ytmdesktop/releases>
+## Highlights
 
-#### Linux
-<!--
-### UPDATE THESE PLATFORMS ###
-- Snap: <https://snapcraft.io/youtube-music-desktop-app>
--->
-- Arch Linux (AUR): <https://aur.archlinux.org/packages/ytmdesktop> (Community Maintained)
-- Binaries: <https://github.com/ytmdesktop/ytmdesktop/releases>
+- **Dark Glassmorphism UI** — Built around an OLED obsidian surface (`#0b0c10`), frosted glass panels, and crisp crimson/ruby accents (`#ff1f4b`).
+- **Smart TitleBar & Live Shield Pill** — Back/Forward/Reload/Home navigation alongside a real-time **Ad Shield** pill showing session blocks and one-click pause/resume.
+- **Built-in Ad Shield** — Powered by `@ghostery/adblocker` using EasyList and uBlock Origin lists, supporting network blocking, cosmetic element hiding, and inline audio-stream scriptlets cached locally for offline startup.
+- **Chrome Manifest V2 Extensions** — Load unpacked extensions (such as uBlock Origin MV2) directly into your YouTube Music session.
+- **Floating Glass Miniplayer** — Blurred album artwork backdrop, formatted track time (`mm:ss`), quick Like/Dislike actions, Shuffle/Repeat controls, volume slider, and always-on-top pin.
+- **Searchable Settings Dashboard** — Quick setting search, Hero protection stats, visual extension cards, `<kbd>` shortcut badges, and desktop integrations (Discord Rich Presence, Last.fm, Companion Server, Custom CSS, Global Shortcuts).
 
-#### Mac
-- Brew: ```brew install --cask ytmdesktop-youtube-music``` (Community Maintained)
-- Binaries: <https://github.com/ytmdesktop/ytmdesktop/releases>
+---
 
-# Ad blocking
+## Installation
 
-Everything lives under **Settings → Adblock** and works in two independent ways.
+### Windows (Winget)
 
-## Built-in blocker
+```powershell
+winget install oPaozinh0.YTMDesktopAdblock
+```
 
-Powered by [@ghostery/adblocker](https://github.com/ghostery/adblocker) with EasyList and uBlock
-Origin's filter lists. It is on by default and has three parts:
+### Direct Installers
 
-- **Filter lists** — ads only, ads and trackers (default), or also annoyances. The compiled engine is
-  cached under `<userData>/adblocker` and refreshed every three days; when the lists can't be fetched
-  the cached engine is used, so the app still blocks while offline.
-- **Cosmetic filtering** — hides ad placeholders left behind in the page.
-- **Scriptlet injection** — this is the one that stops the ads YouTube Music plays *between songs*.
-  Those come from the same domain as the music itself, so no amount of network filtering catches
-  them; only the filter lists' scriptlets do. They're injected into the page's main world at document
-  start, before YouTube Music's own scripts run — injecting them any later makes them fight the
-  player proxy this app installs and the view dies with `Maximum call stack size exceeded`. Turn this
-  off if playback ever starts misbehaving.
+Download the latest Windows installer or portable archive directly from [GitHub Releases](https://github.com/oPaozinh0/ytmdesktop/releases).
 
-## Browser extensions
+---
 
-Unpacked Chrome extensions can be loaded into the YouTube Music view. Point the setting at an
-extension folder (the one containing `manifest.json`) and it is loaded on every launch.
+## Ad Shield & Extensions
 
-Electron only implements a subset of the Chrome extension APIs, so a few things are worth knowing:
+Everything lives under **Settings → Ad Shield** (or by clicking the **Shield** pill in the TitleBar):
 
-- **Packed `.crx` files are not supported** — extensions have to be unpacked directories.
-- **Manifest V2 blockers work**, because Electron implements `chrome.webRequest`. uBlock Origin
-  (the `uBlock0_*.chromium.zip` release from [gorhill/uBlock](https://github.com/gorhill/uBlock/releases))
-  is the tested case.
-- **Manifest V3 blockers do not.** Electron has no `chrome.declarativeNetRequest`, so uBlock Origin
-  Lite and friends load without ever blocking anything.
-- Extension UI (toolbar popups, badges, context menus) doesn't exist here. `src/renderer/extensions/shim-preload.ts`
-  stubs out the missing APIs so extensions get through startup instead of throwing — without it
-  uBlock Origin's background page dies on `browserAction` and never registers its request listeners.
+### 1. Built-in Ad Shield
 
-# Developing
-To clone and run this repository you'll need [Git](https://git-scm.com) and [Node.js (v20)](https://nodejs.org/en/download/) (which comes with [npm](http://npmjs.com)) installed on your computer. From your command line:
+- **Filter Lists** — Choose between *Ads only*, *Ads and trackers*, or *Ads, trackers and annoyances*. The compiled engine is cached locally under `<userData>/adblocker` and refreshes every three days.
+- **Cosmetic Filtering** — Hides ad placeholders and promotional cards inside YouTube Music.
+- **Scriptlet Injection** — Injects anti-ad scriptlets at document start before YouTube Music initializes so mid-roll ads served from the same media origin are stopped without breaking player hooks.
+
+### 2. Browser Extensions
+
+Unpacked Chrome extensions can be added by selecting a folder containing `manifest.json`:
+
+- **Manifest V2 blockers** (such as uBlock Origin from [gorhill/uBlock](https://github.com/gorhill/uBlock/releases)) work natively via `chrome.webRequest`.
+- **Manifest V3 blockers** relying on `chrome.declarativeNetRequest` (such as uBlock Origin Lite) are not supported by Electron's extension runtime.
+- Packed `.crx` archives must be extracted first before adding.
+
+---
+
+## Development
+
+Prerequisites: [Git](https://git-scm.com) and [Node.js (v20+)](https://nodejs.org/) with `corepack` enabled (`pnpm`).
 
 ```sh
-# Clone this repository
-git clone https://github.com/ytmdesktop/ytmdesktop.git
-# Go into the directory
+git clone https://github.com/oPaozinh0/ytmdesktop.git
 cd ytmdesktop
-```
-##### And:
-```sh
-# If you do not have Yarn Installed / New to Node as a whole you can enable Yarn with:
+
 corepack enable
+pnpm install
 
-# Install dependencies
-yarn install
-# Run the app
-yarn start
+# Start in development mode
+pnpm start
 ```
 
-# Building the Project
-To build for your platform you need to run `yarn make`, however please see the information below regarding the required additionally Software, Tools and Packages which are needed to successfully package into a nice installer file.
+### Useful Scripts
 
-## Windows
-To download the full suite of Tools/Software needed to build the app it is recommended to install the suite of build tools that electron provide which includes Visual Studio, Python and other tools.
+```sh
+# Type-check TypeScript sources
+pnpm typecheck
 
-`npm i -g @electron/build-tools`
+# Lint codebase
+pnpm lint
 
-This will start downloading and installing, and may require a few prompts here and there to finalise everything.
+# Package unpacked Electron build
+pnpm package
 
-<!--
-TODO: Fill this information in
-## MacOS
-*to do*
--->
+# Build distributable installer (Squirrel on Windows)
+pnpm make
+```
 
-## Linux
-Building the project on Linux only requires you to install:
-- For building on Debian based Linux Distros like Ubuntu, you will need to install `fakeroot` and `dpkg`
-- For building on RedHat based Linux Distros like Fedora, you will need to install `rpm` or `rpm-build`
+---
 
-*please note that by default both packages are built if you try building this application on a linux distro*
+## License & Attribution
 
-<!--
-### Note to the note, I suspect this has been fixed now, testing myself I was able to run the software without anything extra, although did have to sepecify `--disable-gpu` to run.
-**Note:** If you're using Windows Subsystem for Linux (WSL2), [see this guide][more] or use `node` from the command prompt. -->
+Licensed under the [GPL-3.0 License](LICENSE).  
+Developed and maintained by **oPaozinh0** — originally forked from the open-source [ytmdesktop](https://github.com/ytmdesktop/ytmdesktop) desktop client.
 
-<!--
-Project currently doesn't have Locales, so Ignore this for now.
-## To contribute for your own language
-Navigate to [ytmdesktop-locales](https://github.com/ytmdesktop/ytmdesktop-locales) and follow the instructions there.
--->
-
-## Contributors
-
-A Thank you to all the contributors throughout the project, without their work this project would have just been a small project and never expanded to where it is now.
-
-[<img alt="adlerluiz" src="https://avatars.githubusercontent.com/u/2112638?v=4&s=240" width="120" height="120">](https://github.com/adlerluiz)
-[<img alt="NovusTheory" src="https://avatars.githubusercontent.com/u/3434404?v=4&s=240" width="120" height="120">](https://github.com/NovusTheory)
-[<img alt="mingjun97" src="https://avatars.githubusercontent.com/u/15214491?v=4&s=240" width="120" height="120">](https://github.com/mingjun97)
-[<img alt="rickpalmeira" src="https://avatars.githubusercontent.com/u/4140033?v=4&s=240" width="120" height="120">](https://github.com/rickpalmeira)
-[<img alt="Alipoodle" src="https://avatars.githubusercontent.com/u/17199186?v=4&s=240" width="120" height="120">](https://github.com/Alipoodle)
-[<img alt="flleeppyy" src="https://avatars.githubusercontent.com/u/18307183?v=4&s=240" width="120" height="120">](https://github.com/flleeppyy)
-[<img alt="zagoruev" src="https://avatars.githubusercontent.com/u/986243?v=4&s=240" width="120" height="120">](https://github.com/zagoruev)
-[<img alt="Venipa" src="https://avatars.githubusercontent.com/u/17952364?v=4&s=240" width="120" height="120">](https://github.com/Venipa)
-[<img alt="serjan-nasredin" src="https://avatars.githubusercontent.com/u/67647968?v=4&s=240" width="120" height="120">](https://github.com/serjan-nasredin)
-[<img alt="TotalChris" src="https://avatars.githubusercontent.com/u/41809916?v=4&s=240" width="120" height="120">](https://github.com/TotalChris)
-[<img alt="ArnyminerZ" src="https://avatars.githubusercontent.com/u/12086466?v=4&s=240" width="120" height="120">](https://github.com/ArnyminerZ)
-[<img alt="TotallyNotInUse" src="https://avatars.githubusercontent.com/u/56458705?v=4&s=240" width="120" height="120">](https://github.com/TotallyNotInUse)
-[<img alt="ddarkr" src="https://avatars.githubusercontent.com/u/6638675?v=4&s=240" width="120" height="120">](https://github.com/ddarkr)
-[<img alt="pinkiesky" src="https://avatars.githubusercontent.com/u/7098424?v=4&s=240" width="120" height="120">](https://github.com/pinkiesky)
-[<img alt="NNowakowski" src="https://avatars.githubusercontent.com/u/16933892?v=4&s=240" width="120" height="120">](https://github.com/NNowakowski)
-[<img alt="dm3ch" src="https://avatars.githubusercontent.com/u/5025313?v=4&s=240" width="120" height="120">](https://github.com/dm3ch)
-[<img alt="Vistaus" src="https://avatars.githubusercontent.com/u/1716229?v=4&s=240" width="120" height="120">](https://github.com/Vistaus)
-[<img alt="smarquespt" src="https://avatars.githubusercontent.com/u/1302668?v=4&s=240" width="120" height="120">](https://github.com/smarquespt)
-[<img alt="peter9811" src="https://avatars.githubusercontent.com/u/22783445?v=4&s=240" width="120" height="120">](https://github.com/peter9811)
-[<img alt="KageRyo" src="https://avatars.githubusercontent.com/u/36478298?v=4&s=240" width="120" height="120">](https://github.com/KageRyo)
-[<img alt="andrew000" src="https://avatars.githubusercontent.com/u/11490628?v=4&s=240" width="120" height="120">](https://github.com/andrew000)
-[<img alt="danparidae" src="https://avatars.githubusercontent.com/u/7272087?v=4&s=240" width="120" height="120">](https://github.com/danparidae)
-[<img alt="tbvjaos510" src="https://avatars.githubusercontent.com/u/32216112?v=4&s=240" width="120" height="120">](https://github.com/tbvjaos510)
-[<img alt="andia89" src="https://avatars.githubusercontent.com/u/6475757?v=4&s=240" width="120" height="120">](https://github.com/andia89)
-[<img alt="nils-kt" src="https://avatars.githubusercontent.com/u/34674720?v=4&s=240" width="120" height="120">](https://github.com/nils-kt)
-[<img alt="Nerogar" src="https://avatars.githubusercontent.com/u/3390934?v=4&s=240" width="120" height="120">](https://github.com/Nerogar)
-[<img alt="nattadasu" src="https://avatars.githubusercontent.com/u/49780229?v=4&s=240" width="120" height="120">](https://github.com/nattadasu)
-[<img alt="mkotb" src="https://avatars.githubusercontent.com/u/6364146?v=4&s=240" width="120" height="120">](https://github.com/mkotb)
-[<img alt="chaoky" src="https://avatars.githubusercontent.com/u/9826702?v=4&s=240" width="120" height="120">](https://github.com/chaoky)
-[<img alt="ElectricalBoy" src="https://avatars.githubusercontent.com/u/15651807?v=4&s=240" width="120" height="120">](https://github.com/ElectricalBoy)
-
-[discord-img]: https://img.shields.io/badge/Discord-JOIN-GREEN.svg?style=for-the-badge&logo=discord
-[discord-url]: https://discord.gg/88P2n2a
-[gitmoji-img]: https://img.shields.io/badge/Gitmoji-STANDARD-FFDD67.svg?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyBhcmlhLWhpZGRlbj0idHJ1ZSIgZGF0YS1wcmVmaXg9ImZhcyIgZGF0YS1pY29uPSJncmluLXRvbmd1ZS13aW5rIiBjbGFzcz0ic3ZnLWlubGluZS0tZmEgZmEtZ3Jpbi10b25ndWUtd2luayBmYS13LTE2IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OTYgNTEyIj48cGF0aCBmaWxsPSIjRkZERDY3IiBkPSJNMzQ0IDE4NGEyNCAyNCAwIDEwMCA0OCAyNCAyNCAwIDEwMC00OHpNMjQ4IDhhMjQ4IDI0OCAwIDAwLTg3IDQ4MGMtNi0xMi05LTI2LTktNDB2LTQ1Yy0yNS0xNy00My0zOS00OC02NC0yLTEyIDEwLTIyIDIxLTE4IDMwIDEwIDc1IDE1IDEyMyAxNXM5My01IDEyMy0xNWMxMi00IDIzIDYgMjEgMTgtNCAyNS0yMyA0Ny00OCA2M3Y0NmMwIDE0LTMgMjgtOSA0MEEyNDggMjQ4IDAgMDAyNDggOHptLTU2IDIyNWwtOS04Yy0xNS0xNC00Ny0xNC02MSAwbC0xMCA4Yy04IDctMjIgMC0yMC0xMSA0LTI1IDM0LTQyIDYwLTQyczU2IDE3IDYwIDQyYzIgMTEtMTIgMTgtMjAgMTF6bTE1MiAzOWE2NCA2NCAwIDExMC0xMjggNjQgNjQgMCAwMTAgMTI4em0tNTEgMTAzYy0xNC03LTMxIDItMzQgMTdsLTIgOGMtMiA5LTE2IDktMTggMGwtMS04Yy00LTE1LTIxLTI0LTM1LTE3bC0xOSA5djYzYzAgMzUgMjggNjUgNjMgNjUgMzYgMCA2NS0yOSA2NS02NHYtNjRsLTE5LTl6Ii8+PC9zdmc+
-[gitmoji-url]: https://gitmoji.carloscuesta.me
-[license-img]: https://img.shields.io/github/license/ytmdesktop/ytmdesktop.svg?style=for-the-badge&logo=librarything
-[license-url]: https://github.com/ytmdesktop/ytmdesktop/blob/master/LICENSE
-[release-img]: https://img.shields.io/github/release/ytmdesktop/ytmdesktop.svg?style=for-the-badge&logo=flattr
-[release-url]: https://GitHub.com/ytmdesktop/ytmdesktop/releases/
-[download-img]: https://img.shields.io/github/downloads/ytmdesktop/ytmdesktop/total.svg?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyBhcmlhLWhpZGRlbj0idHJ1ZSIgZGF0YS1wcmVmaXg9ImZhcyIgZGF0YS1pY29uPSJjbG91ZC1kb3dubG9hZC1hbHQiIGNsYXNzPSJzdmctaW5saW5lLS1mYSBmYS1jbG91ZC1kb3dubG9hZC1hbHQgZmEtdy0yMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2aWV3Qm94PSIwIDAgNjQwIDUxMiI+PHBhdGggZmlsbD0iI0ZGRiIgZD0iTTUzOCAyMjdjNC0xMSA2LTIzIDYtMzVhOTYgOTYgMCAwMC0xNDktODAgMTYwIDE2MCAwIDAwLTI5OSA4OCAxNDQgMTQ0IDAgMDA0OCAyODBoMzY4YTEyOCAxMjggMCAwMDI2LTI1M3ptLTEzMyA4OEwyOTkgNDIxYy02IDYtMTYgNi0yMiAwTDE3MSAzMTVjLTEwLTEwLTMtMjcgMTItMjdoNjVWMTc2YzAtOSA3LTE2IDE2LTE2aDQ4YzkgMCAxNiA3IDE2IDE2djExMmg2NWMxNSAwIDIyIDE3IDEyIDI3eiIvPjwvc3ZnPg==
-[download-url]: https://github.com/ytmdesktop/ytmdesktop/releases/
-[more]: https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/
+[release-img]: https://img.shields.io/github/v/release/oPaozinh0/ytmdesktop?style=for-the-badge&color=ff1f4b
+[release-url]: https://github.com/oPaozinh0/ytmdesktop/releases
+[download-img]: https://img.shields.io/github/downloads/oPaozinh0/ytmdesktop/total?style=for-the-badge&color=22c55e
+[download-url]: https://github.com/oPaozinh0/ytmdesktop/releases
+[license-img]: https://img.shields.io/github/license/oPaozinh0/ytmdesktop?style=for-the-badge
+[license-url]: https://github.com/oPaozinh0/ytmdesktop/blob/master/LICENSE

@@ -645,7 +645,7 @@ export async function addTimedLyrics() {
   timedLyricsSource.classList.add("ytmd-lyrics-source");
   const timedLyricsYTMDNote = document.createElement("p");
   timedLyricsYTMDNote.classList.add("ytmd-lyrics-ytmdnote");
-  timedLyricsYTMDNote.innerText = "Timed lyrics system provided by YTMDesktop";
+  timedLyricsYTMDNote.innerText = "Timed lyrics system provided by YTM Shield";
 
   const returnToLiveContainer = document.createElement("div");
   returnToLiveContainer.classList.add("ytmd-lyrics-return-live-container");

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import TitleBar from "../../components/TitleBar.vue";
-import logo from "~assets/icons/ytmd_white.png";
 
 const keyboardFocus = ref<HTMLElement>(null);
 const keyboardFocusZero = ref<HTMLElement>(null);
 
-const isMainWindow = ref<boolean>(window.ytmd.isMainWindow);
+const isMainWindow = ref<boolean>(typeof window.ytmd.isMainWindow === "function" ? window.ytmd.isMainWindow() : Boolean(window.ytmd.isMainWindow));
 
 onMounted(() => {
   window.onfocus = () => {
@@ -40,12 +39,13 @@ function openMiniplayer() {
     :has-settings-button="isMainWindow"
     has-minimize-button
     has-maximize-button
-    title="YTMDesktop Adblock"
-    :icon-file="logo"
+    use-shield-logo
+    title="YTM Shield"
   >
     <template #app-buttons>
       <button
         class="app-button"
+        title="Miniplayer"
         @click="openMiniplayer"
       >
         <span class="material-symbols-outlined">pip</span>

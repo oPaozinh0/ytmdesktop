@@ -41,11 +41,11 @@ const hasDescription = computed(() => {
   return props.description && props.description.trim() !== "";
 });
 
-const fileInput = ref(null);
+const fileInput = ref<HTMLInputElement | null>(null);
 
 const selectOpen = ref(false);
 const selectedOption = computed(() => {
-  return props.optionsMap[props.modelValue as number];
+  return props.optionsMap?.[props.modelValue as number] ?? "";
 });
 
 // This function should be using ModelValue[T] but because it's bound to @click it doesn't interpret it as correct
@@ -57,143 +57,162 @@ function select(optionKey: string) {
 </script>
 
 <template>
-  <div :class="{ 'ytmd-setting': true, 'indented': props.indented, 'flex-column': props.flexColumn }">
-    <p v-if="!disabled && !hasDescription">
-      {{ name }} <span
-        v-if="restartRequired"
-        class="reload-required material-symbols-outlined"
-      >autorenew</span>
-      <span
-        v-if="beta"
-        class="beta-tag"
-        title="This is a beta feature and may not work correctly yet."
-      >BETA</span>
-    </p>
-    <div
-      v-else-if="!disabled && hasDescription"
-      class="name-description"
-    >
-      <p class="name">
-        {{ name }} <span
+  <div
+    :class="{
+      'ytmd-setting': true,
+      'indented': props.indented,
+      'flex-column': props.flexColumn,
+      'is-disabled': props.disabled
+    }"
+  >
+    <div class="setting-info">
+      <div class="setting-title-row">
+        <span
+          v-if="disabled"
+          class="disabled-tag"
+        >DISABLED</span>
+        <p class="name">
+          {{ name }}
+        </p>
+        <span
           v-if="restartRequired"
-          class="reload-required material-symbols-outlined"
-        >autorenew</span>
+          class="reload-pill"
+          title="Restart required to apply this change"
+        >
+          <span class="reload-required material-symbols-outlined">autorenew</span>
+          Restart
+        </span>
         <span
           v-if="beta"
           class="beta-tag"
           title="This is a beta feature and may not work correctly yet."
         >BETA</span>
-      </p>
-      <p class="description">
+      </div>
+      <p
+        v-if="!disabled && hasDescription"
+        class="description"
+      >
         {{ description }}
       </p>
-    </div>
-    <div
-      v-if="disabled"
-      class="disabled-name-message"
-    >
-      <p class="name">
-        <span class="disabled-tag">DISABLED</span> {{ name }} <span
-          v-if="restartRequired"
-          class="reload-required material-symbols-outlined"
-        >autorenew</span>
-        <span
-          v-if="beta"
-          class="beta-tag"
-          title="This is a beta feature and may not work correctly yet."
-        >BETA</span>
-      </p>
-      <p class="message">
+      <p
+        v-if="disabled && disabledMessage"
+        class="message"
+      >
         {{ disabledMessage }}
       </p>
     </div>
 
-    <input
-      v-if="type !== 'file' && type !== 'range' && type !== 'select' && type !== 'custom'"
-      v-model="value"
-      :disabled="disabled"
-      :type="props.type"
-      @change="$emit('change', $event)"
-    >
     <div
-      v-if="type == 'range'"
-      class="range-selector"
+      v-if="type !== 'custom'"
+      class="setting-control"
     >
-      <span class="range-value">{{ value }}</span>
+      <label
+        v-if="type === 'checkbox'"
+        class="toggle-switch"
+        :class="{ disabled: disabled }"
+      >
+        <input
+          v-model="value"
+          :disabled="disabled"
+          type="checkbox"
+          @change="$emit('change', $event)"
+        >
+        <span class="toggle-track">
+          <span class="toggle-thumb" />
+        </span>
+      </label>
+
       <input
+        v-else-if="type !== 'file' && type !== 'range' && type !== 'select'"
         v-model="value"
         :disabled="disabled"
         :type="props.type"
-        :max="props.max"
-        :min="props.min"
-        :step="props.step"
         @change="$emit('change', $event)"
       >
-    </div>
-    <div
-      v-if="type == 'file'"
-      class="file-picker"
-    >
-      <input
-        ref="fileInput"
-        :disabled="disabled"
-        type="file"
-        accept=".css"
-        :data-setting="bindSetting"
-        @change="$emit('file-change', $event)"
-      >
-      <div class="file-input-button">
-        <button
-          class="choose"
-          @click="fileInput.click()"
-        >
-          <span class="material-symbols-outlined">file_open</span>
-        </button>
-        <input
-          :disabled="disabled"
-          type="text"
-          readonly
-          class="path"
-          placeholder="No file chosen"
-          :value="value"
-        >
-        <button
-          v-if="value"
-          class="remove"
-          @click="$emit('clear')"
-        >
-          <span class="material-symbols-outlined">delete</span>
-        </button>
-      </div>
-    </div>
-    <div
-      v-if="type == 'select'"
-      :class="{ select: true, open: selectOpen }"
-    >
+
       <div
-        class="selected"
-        @click="selectOpen = !selectOpen"
+        v-if="type === 'range'"
+        class="range-selector"
       >
-        <p class="text">
-          {{ selectedOption }}
-        </p>
-        <span
-          v-if="!selectOpen"
-          class="material-symbols-outlined"
-        >arrow_drop_down</span>
-        <span
-          v-if="selectOpen"
-          class="material-symbols-outlined"
-        >arrow_drop_up</span>
-      </div>
-      <div class="options">
-        <div
-          v-for="(optionValue, optionKey) of props.optionsMap"
-          :key="optionKey"
-          class="option"
-          @click="select(optionKey)"
+        <span class="range-value">{{ value }}</span>
+        <input
+          v-model="value"
+          :disabled="disabled"
+          type="range"
+          :max="props.max"
+          :min="props.min"
+          :step="props.step"
+          @change="$emit('change', $event)"
         >
-          {{ optionValue }}
+      </div>
+
+      <div
+        v-if="type === 'file'"
+        class="file-picker"
+      >
+        <input
+          ref="fileInput"
+          :disabled="disabled"
+          type="file"
+          accept=".css"
+          :data-setting="bindSetting"
+          @change="$emit('file-change', $event)"
+        >
+        <div class="file-input-button">
+          <button
+            class="choose"
+            title="Choose file"
+            @click="fileInput?.click()"
+          >
+            <span class="material-symbols-outlined">file_open</span>
+          </button>
+          <input
+            :disabled="disabled"
+            type="text"
+            readonly
+            class="path"
+            placeholder="No file chosen"
+            :value="value"
+          >
+          <button
+            v-if="value"
+            class="remove"
+            title="Clear file"
+            @click="$emit('clear')"
+          >
+            <span class="material-symbols-outlined">delete</span>
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="type === 'select'"
+        :class="{ select: true, open: selectOpen }"
+      >
+        <div
+          class="selected"
+          @click="selectOpen = !selectOpen"
+        >
+          <p class="text">
+            {{ selectedOption }}
+          </p>
+          <span class="material-symbols-outlined">
+            {{ selectOpen ? "expand_less" : "expand_more" }}
+          </span>
+        </div>
+        <div
+          v-if="selectOpen"
+          class="options"
+        >
+          <div
+            v-for="(optionValue, optionKey) of props.optionsMap"
+            :key="optionKey"
+            class="option"
+            :class="{ active: Number(optionKey) === Number(modelValue) }"
+            @click="select(String(optionKey))"
+          >
+            {{ optionValue }}
+          </div>
         </div>
       </div>
     </div>
@@ -207,226 +226,324 @@ function select(optionKey: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.ytmd-setting:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
 .ytmd-setting.indented {
-  margin-left: 12px;
-  padding-left: 12px;
-  border-left: 1px solid #212121;
+  margin-left: 16px;
+  border-left: 2px solid rgba(255, 31, 75, 0.42);
 }
 
 .ytmd-setting.flex-column {
   flex-direction: column;
-  align-items: initial;
-  justify-content: initial;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
 }
 
-.ytmd-setting .beta-tag {
-  background-color: #f44336;
-  border-radius: 4px;
-  padding: 2px 4px;
+.ytmd-setting.is-disabled {
+  opacity: 0.72;
 }
 
-.ytmd-setting .disabled-tag {
-  background-color: #212121;
-  border-radius: 4px;
-  padding: 2px 4px;
+.setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
-.name-description .name,
-.disabled-name-message .name {
-  margin-bottom: unset;
+.setting-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.name-description .description,
-.disabled-name-message .message {
-  margin-top: 4px;
-  color: #969696;
+.name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.description {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.message {
+  color: #f87171;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.reload-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  padding: 1px 7px;
+  border-radius: 999px;
 }
 
 .reload-required {
-  vertical-align: middle;
+  font-size: 13px;
 }
 
-input[type="checkbox"] {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  min-width: 62px;
-  min-height: 32px;
-  width: 62px;
-  height: 32px;
-  display: inline-block;
+.beta-tag {
+  background: rgba(255, 31, 75, 0.18);
+  color: #ff6e89;
+  border: 1px solid rgba(255, 31, 75, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.disabled-tag {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.setting-control {
+  flex-shrink: 0;
+}
+
+/* Smooth Crimson Toggle Switch */
+.toggle-switch {
   position: relative;
-  border-radius: 50px;
-  overflow: hidden;
-  outline: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
-  background-color: #212121;
-  transition: background-color ease 0.3s;
 }
 
-input[type="checkbox"]:before {
-  content: "";
-  display: block;
-  position: absolute;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  background: #fff;
-  left: 2px;
-  top: 2px;
-  border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: all ease 0.3s;
-}
-
-input[type="checkbox"]:checked {
-  background-color: #f44336;
-}
-
-input[type="checkbox"]:checked:before {
-  left: 32px;
-}
-
-input[type="checkbox"]:disabled {
-  background-color: #212121;
+.toggle-switch.disabled {
   cursor: not-allowed;
 }
 
-input[type="checkbox"]:disabled::before {
-  background-color: #969696;
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
 
-input[type="file"] {
-  display: none;
+.toggle-track {
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.file-picker {
-  background-color: #212121;
-  border-radius: 4px;
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e2e4ec;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s ease;
 }
 
-.file-input-button {
-  width: 216px;
-  border-radius: 4px;
+.toggle-switch input:checked + .toggle-track {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+
+.toggle-switch input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(20px);
+  background: #ffffff;
+}
+
+/* Range Slider */
+.range-selector {
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
-.file-input-button button {
-  padding: 8px;
-  border: none;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
+.range-value {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 3px 7px;
 }
 
-.file-input-button button.choose {
-  background-color: #f44336;
-  border-radius: 4px 0 0 4px;
-}
-
-.file-input-button button.remove {
-  background-color: transparent;
-  border-left: 1px solid #323232;
-  border-radius: 0 4px 4px 0;
-}
-
-.file-input-button button .material-symbols-outlined {
-  margin-right: 4px;
-  font-size: 18px;
-}
-
-.file-input-button input[type="text"] {
-  margin: 0;
-  padding: 8px;
-  width: 100%;
-  border: none;
-  background-color: transparent;
-}
-
-.file-input-button input[type="text"]:focus,
-.file-input-button input[type="text"]:active {
+input[type="range"] {
+  appearance: none;
+  width: 150px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
   outline: none;
 }
 
-.file-input-button p {
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px var(--accent-glow);
+  cursor: pointer;
+}
+
+/* File Picker */
+.file-picker input[type="file"] {
+  display: none;
+}
+
+.file-input-button {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.file-input-button .choose,
+.file-input-button .remove {
+  height: 34px;
+  width: 34px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.file-input-button .choose:hover {
+  background: var(--accent-soft);
+  color: #ff6e89;
+}
+
+.file-input-button .remove:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.file-input-button .path {
+  height: 34px;
+  width: 190px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.file-input-button .material-symbols-outlined {
+  font-size: 18px;
+}
+
+/* Select Dropdown */
+.select {
+  position: relative;
+  min-width: 220px;
+}
+
+.select .selected {
+  height: 36px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.select .selected:hover,
+.select.open .selected {
+  border-color: var(--accent-primary);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.select .selected .text {
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.range-value {
-  vertical-align: top;
-  margin-right: 8px;
-}
-
-input[type="range"] {
-  appearance: none;
-  height: 15px;
-  border-radius: 4px;
-  background: #212121;
-  outline: none;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #f44336;
-  cursor: pointer;
-}
-
-.select {
-  position: relative;
-  width: 216px;
-  background-color: #212121;
-  border-radius: 4px;
-}
-
-.select.open {
-  border-radius: 4px 4px 0 0;
-}
-
-.select .selected {
-  cursor: pointer;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.select .selected .text {
-  margin: unset;
-  padding: unset;
-}
-
 .select .options {
-  overflow: hidden;
   position: absolute;
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
-  z-index: 1;
-  border-radius: 0 0 4px 4px;
-  width: 100%;
+  background: rgba(20, 22, 30, 0.98);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-elevated);
+  overflow: hidden;
+  z-index: 20;
 }
 
-.select .options .option {
-  user-select: none;
+.select .option {
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
   cursor: pointer;
-  background-color: #212121;
-  padding: 8px;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.select .options .option:hover {
-  background-color: #323232;
+.select .option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
 }
 
-.select:not(.open) .options {
-  display: none;
+.select .option.active {
+  background: var(--accent-soft);
+  color: #ff6e89;
+  font-weight: 600;
 }
 </style>

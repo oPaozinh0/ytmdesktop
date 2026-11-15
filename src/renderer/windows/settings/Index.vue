@@ -7,8 +7,8 @@ import Settings from "./Settings.vue";
   <div class="container">
     <TitleBar
       class="titlebar"
-      title="Settings"
-      icon="settings"
+      title="YTM Shield Settings"
+      use-shield-logo
     />
     <Suspense>
       <Settings class="settings" />
@@ -17,15 +17,20 @@ import Settings from "./Settings.vue";
 </template>
 
 <style scoped>
-.settings {
-  border-top: 1px solid #212121;
-  background-color: #000000;
-  height: calc(100% - 36px);
-}
-
 .container {
   width: 100%;
   height: 100%;
-  background-color: #000000;
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings {
+  background:
+    radial-gradient(620px 320px at 85% -10%, rgba(255, 31, 75, 0.08), transparent 70%),
+    radial-gradient(500px 340px at 10% 110%, rgba(34, 197, 94, 0.04), transparent 70%),
+    var(--bg-base);
+  height: calc(100% - 36px);
+  overflow: hidden;
 }
 </style>

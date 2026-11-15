@@ -21,7 +21,7 @@ declare global {
         add(): Promise<{ extension?: UserExtension; error?: string; cancelled?: boolean }>;
         remove(extensionPath: string): Promise<void>;
       };
-      openSettingsWindow(): void;
+      openSettingsWindow(initialTab?: number): void;
       restartApplication(): void;
       restartApplicationForUpdate(): void;
       getTrueFilePath(file: File): string;
@@ -44,6 +44,8 @@ declare global {
       ytmViewStatusChanged(callback: (status: YTMViewStatus) => void): void;
       ytmViewLoadError(callback: (loadError: { code: number; description: string }) => void): void;
       ytmViewReload(): void;
+      ytmViewGoBack(): void;
+      ytmViewGoForward(): void;
 
       // View specific
       appViewHiding(callback: () => void): void;

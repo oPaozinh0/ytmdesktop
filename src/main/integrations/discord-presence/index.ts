@@ -98,7 +98,7 @@ export default class DiscordPresence extends Integration {
         instance: false,
         buttons: [
           {
-            label: "Play on YTMDesktop",
+            label: "Play on YTM Shield",
             url: `ytmd://play/${id}`
           }
         ]

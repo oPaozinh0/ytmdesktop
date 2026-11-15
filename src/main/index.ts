@@ -89,7 +89,7 @@ log.info("Application launched");
 app.enableSandbox();
 
 // appMenu allows for some basic windows management, editMenu allow for copy and paste shortcuts on MacOS
-const template: MenuItemConstructorOptions[] = [{ role: "appMenu", label: "YTMDesktop Adblock" }, { role: "editMenu" }];
+const template: MenuItemConstructorOptions[] = [{ role: "appMenu", label: "YTM Shield" }, { role: "editMenu" }];
 const builtMenu = process.platform === "darwin" ? Menu.buildFromTemplate(template) : null; // null for performance https://www.electronjs.org/docs/latest/tutorial/performance#8-call-menusetapplicationmenunull-when-you-do-not-need-a-default-menu
 Menu.setApplicationMenu(builtMenu);
 
@@ -278,8 +278,8 @@ app.on("ready", async () => {
       icon: getIconPath("ytmd.png"),
       titleBarStyle: "hidden",
       titleBarOverlay: {
-        color: "#000000",
-        symbolColor: "#BBBBBB",
+        color: "#0b0c10",
+        symbolColor: "#f4f4f6",
         height: 36
       },
       webPreferences: {
@@ -328,7 +328,9 @@ app.on("ready", async () => {
     }
   });
 
-  mainWindow.ipcOn("window:openSettings", () => {
+  mainWindow.ipcOn("window:openSettings", (_event, initialTab?: number) => {
+    memoryStore.set("settingsInitialTab", typeof initialTab === "number" ? initialTab : null);
+
     if (windowManager.hasWindow("Settings")) {
       windowManager.getWindow("Settings").showAndFocus();
       return;
@@ -341,13 +343,15 @@ app.on("ready", async () => {
       waitForViews: true,
       url: app.isPackaged ? "ytmd-app://settings" : ALL_WINDOWS_VITE_DEV_SERVER_URL + "/windows/settings/index.html",
       electronOptions: {
-        width: 800,
-        height: 600,
-        x: Math.round(mainWindowBounds.x + (mainWindowBounds.width / 2 - 400)),
-        y: Math.round(mainWindowBounds.y + (mainWindowBounds.height / 2 - 300)),
+        width: 920,
+        height: 650,
+        minWidth: 780,
+        minHeight: 540,
+        x: Math.round(mainWindowBounds.x + (mainWindowBounds.width / 2 - 460)),
+        y: Math.round(mainWindowBounds.y + (mainWindowBounds.height / 2 - 325)),
         minimizable: false,
         maximizable: false,
-        resizable: false,
+        resizable: true,
         frame: false,
         show: false,
         icon: getIconPath("ytmd.png"),
@@ -355,8 +359,8 @@ app.on("ready", async () => {
         modal: process.platform !== "darwin",
         titleBarStyle: "hidden",
         titleBarOverlay: {
-          color: "#000000",
-          symbolColor: "#BBBBBB",
+          color: "#0b0c10",
+          symbolColor: "#f4f4f6",
           height: 36
         },
         webPreferences: {
@@ -370,6 +374,7 @@ app.on("ready", async () => {
     settingsWindow.setWindowOpenHandler(details => {
       if (
         details.url === "https://github.com/oPaozinh0/ytmdesktop" ||
+        details.url === "https://github.com/oPaozinh0/ytmdesktop/issues" ||
         details.url === "https://github.com/ytmdesktop/ytmdesktop" ||
         details.url === "https://ytmdesktop.github.io/"
       ) {
@@ -409,7 +414,6 @@ app.on("ready", async () => {
         frame: false,
         show: false,
         icon: getIconPath("ytmd.png"),
-        titleBarStyle: "hidden",
         webPreferences: {
           sandbox: true,
           contextIsolation: true,
@@ -463,6 +467,24 @@ app.on("ready", async () => {
     const ytmView = ytmViewManager.getView();
     if (ytmView) ytmView.webContents?.loadURL("https://music.youtube.com/");
   });
+  mainWindow.ipcOn("ytmView:reload", () => {
+    const ytmView = ytmViewManager.getView();
+    if (ytmView) {
+      ytmView.webContents?.reload();
+    }
+  });
+  mainWindow.ipcOn("ytmView:goBack", () => {
+    const ytmView = ytmViewManager.getView();
+    if (ytmView?.webContents?.navigationHistory.canGoBack()) {
+      ytmView.webContents.navigationHistory.goBack();
+    }
+  });
+  mainWindow.ipcOn("ytmView:goForward", () => {
+    const ytmView = ytmViewManager.getView();
+    if (ytmView?.webContents?.navigationHistory.canGoForward()) {
+      ytmView.webContents.navigationHistory.goForward();
+    }
+  });
   //#endregion
 
   // Late updater window closure to prevent Electron from emitting window-all-closed before creating the main window
@@ -497,7 +519,7 @@ app.on("ready", async () => {
   tray = new Tray(getTrayIconPath());
   trayContextMenu = Menu.buildFromTemplate([
     {
-      label: "YTMDesktop Adblock",
+      label: "YTM Shield",
       type: "normal",
       enabled: false
     },
@@ -556,7 +578,7 @@ app.on("ready", async () => {
       }
     }
   ]);
-  tray.setToolTip("YTMDesktop Adblock");
+  tray.setToolTip("YTM Shield");
   tray.setContextMenu(trayContextMenu);
   tray.on("click", () => {
     mainWindow.showAndFocus();
@@ -583,12 +605,12 @@ app.on("ready", async () => {
         const unsetFlags = setupFlagNames.filter(key => (setupFlags & YTMViewSetupCompletionFlags[key]) === 0);
 
         const dialogMessage =
-          `Features from YTMDesktop may not be present or function correctly\n\nThis usually means there's a bug and a bug report should be filed on the GitHub\n\nHook log:\n${setFlags.map(flag => `    ${flag}... OK\n`).join("")}${unsetFlags.map(flag => `    ${flag}... FAIL\n`).join("")}\n` +
+          `Features from YTM Shield may not be present or function correctly\n\nThis usually means there's a bug and a bug report should be filed on the GitHub\n\nHook log:\n${setFlags.map(flag => `    ${flag}... OK\n`).join("")}${unsetFlags.map(flag => `    ${flag}... FAIL\n`).join("")}\n` +
           `${hookError?.stack}`;
         dialog
           .showMessageBox({
             title: "Hook Error",
-            message: "YTMDesktop could not hook YouTube Music",
+            message: "YTM Shield could not hook YouTube Music",
             detail: dialogMessage,
             type: "warning",
             buttons: ["Copy to Clipboard and I understand", "I understand"]
@@ -651,8 +673,8 @@ app.on("ready", async () => {
         modal: process.platform !== "darwin",
         titleBarStyle: "hidden",
         titleBarOverlay: {
-          color: "#000000",
-          symbolColor: "#BBBBBB",
+          color: "#0b0c10",
+          symbolColor: "#f4f4f6",
           height: 36
         },
         webPreferences: {

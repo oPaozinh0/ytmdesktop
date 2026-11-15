@@ -28,6 +28,17 @@ window.addEventListener("message", async event => {
     protectedApiBound = true;
   }
 
+  if (event.data?.op === "ytmd-user-gesture") {
+    await webFrame.executeJavaScript(
+      `(function() {
+        if (typeof window.__YTMD_RUN_GESTURE_QUEUE__ === "function") {
+          window.__YTMD_RUN_GESTURE_QUEUE__();
+        }
+      })()`,
+      true
+    );
+  }
+
   if (event.data.op && event.data.op === "ytmd-ready") {
     ipcRenderer.send("ytmView:ready", event.data.completions);
 

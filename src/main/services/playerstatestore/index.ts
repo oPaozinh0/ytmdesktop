@@ -377,12 +377,12 @@ export default class PlayerStateStore extends EventEmitterService<PlayerStateSto
 
     if (state.hasFullMetadata && state.videoDetails) {
       if (windowManager.hasWindow("Main"))
-        windowManager.getWindow("Main").setTitle(`${state.videoDetails.title} - ${state.videoDetails.author} | YTMDesktop`);
+        windowManager.getWindow("Main").setTitle(`${state.videoDetails.title} - ${state.videoDetails.author} | YTM Shield`);
       if (windowManager.hasWindow("Miniplayer"))
-        windowManager.getWindow("Miniplayer").setTitle(`${state.videoDetails.title} - ${state.videoDetails.author} | YTMDesktop - Miniplayer`);
+        windowManager.getWindow("Miniplayer").setTitle(`${state.videoDetails.title} - ${state.videoDetails.author} | YTM Shield - Miniplayer`);
     } else {
-      if (windowManager.hasWindow("Main")) windowManager.getWindow("Main").setTitle(`YTMDesktop`);
-      if (windowManager.hasWindow("Miniplayer")) windowManager.getWindow("Miniplayer").setTitle("YTMDesktop - Miniplayer");
+      if (windowManager.hasWindow("Main")) windowManager.getWindow("Main").setTitle(`YTM Shield`);
+      if (windowManager.hasWindow("Miniplayer")) windowManager.getWindow("Miniplayer").setTitle("YTM Shield - Miniplayer");
     }
 
     const stateManager = this.getDependency(StateManager);

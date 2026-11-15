@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import logo from "~assets/icons/ytmd.png";
+import ShieldLogo from "../../components/ShieldLogo.vue";
 
 const appLoadingStatus = ref<string>("Checking for updates...");
 
@@ -8,7 +8,7 @@ window.ytmd.autoUpdater.onChecking(() => {
   appLoadingStatus.value = "Checking for updates...";
 });
 window.ytmd.autoUpdater.onNotAvailable(() => {
-  appLoadingStatus.value = "No updates available";
+  appLoadingStatus.value = "Up to date";
 });
 window.ytmd.autoUpdater.onAvailable(() => {
   appLoadingStatus.value = "Downloading update...";
@@ -23,11 +23,11 @@ window.ytmd.autoUpdater.onError(() => {
 
 <template>
   <div class="app-updater-container">
-    <img
-      class="logo"
-      draggable="false"
-      :src="logo"
-    >
+    <ShieldLogo
+      :size="84"
+      glow
+    />
+    <span class="brand">YTM Shield</span>
     <div class="music-loader">
       <div class="loader-line" />
       <div class="loader-line" />
@@ -47,81 +47,87 @@ window.ytmd.autoUpdater.onError(() => {
 <style scoped>
 .app-updater-container {
   height: 100%;
-  background-color: #000000;
+  background:
+    radial-gradient(240px 200px at 50% 35%, rgba(255, 31, 75, 0.16), transparent 72%),
+    var(--bg-base);
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
+  gap: 8px;
   user-select: none;
+  -webkit-app-region: drag;
 }
 
-.logo {
-  width: 128px;
-  height: 128px;
-  margin-bottom: 16px;
+.brand {
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
 .status-text {
-  color: #969696;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .music-loader {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 80px;
+  gap: 6px;
+  height: 46px;
+  margin: 4px 0;
 }
 
 .loader-line {
-  width: 6px;
-  height: 2px;
-  border-radius: 10px;
-  background-color: #ffffff;
-  animation: musicloader 1.5s ease-in-out infinite;
+  width: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff5275, var(--accent-primary));
+  animation: musicloader 1.4s ease-in-out infinite;
 }
 
 .loader-line:nth-child(1) {
-  animation-delay: 1s;
+  animation-delay: 0.9s;
 }
-
 .loader-line:nth-child(2) {
-  animation-delay: 0.8s;
+  animation-delay: 0.7s;
 }
-
 .loader-line:nth-child(3) {
-  animation-delay: 0.4s;
+  animation-delay: 0.35s;
 }
-
 .loader-line:nth-child(4) {
-  animation-delay: 0.2s;
+  animation-delay: 0.15s;
 }
-
 .loader-line:nth-child(5) {
-  animation-delay: 0.2s;
+  animation-delay: 0.15s;
 }
-
 .loader-line:nth-child(6) {
-  animation-delay: 0.4s;
+  animation-delay: 0.35s;
 }
-
 .loader-line:nth-child(7) {
-  animation-delay: 0.8s;
+  animation-delay: 0.7s;
 }
-
 .loader-line:nth-child(8) {
-  animation-delay: 1s;
+  animation-delay: 0.9s;
 }
 
 @keyframes musicloader {
   0% {
-    height: 4px;
+    height: 5px;
+    opacity: 0.45;
   }
   50% {
-    height: 56px;
+    height: 36px;
+    opacity: 1;
   }
   100% {
-    height: 4px;
+    height: 5px;
+    opacity: 0.45;
   }
 }
 </style>

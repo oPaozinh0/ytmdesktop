@@ -380,8 +380,8 @@ const CompanionServerAPIv1: FastifyPluginCallback<CompanionServerAPIv1Options> =
         frame: false,
         titleBarStyle: "hidden",
         titleBarOverlay: {
-          color: "#000000",
-          symbolColor: "#BBBBBB",
+          color: "#0b0c10",
+          symbolColor: "#f4f4f6",
           height: 36
         },
         webPreferences: {

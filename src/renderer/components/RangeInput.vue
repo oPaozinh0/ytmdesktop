@@ -21,6 +21,7 @@ const track = ref<HTMLDivElement | null>(null);
 const isDragging = ref(false);
 
 const progress = computed(() => {
+  if (props.max === props.min) return 0;
   const clamped = Math.min(Math.max(model.value, props.min), props.max);
   return ((clamped - props.min) / (props.max - props.min)) * 100;
 });
@@ -35,8 +36,7 @@ function updateValueFromEvent(event: MouseEvent | TouchEvent) {
   const x = event instanceof TouchEvent ? event.touches[0].clientX : event.clientX;
   const percent = (x - rect.left) / rect.width;
   const newValue = props.min + percent * (props.max - props.min);
-  const clamped = Math.min(props.max, Math.max(props.min, newValue));
-  model.value = clamped;
+  model.value = clamp(newValue);
 }
 
 function startDrag(event: MouseEvent | TouchEvent) {
@@ -73,6 +73,7 @@ onBeforeUnmount(stopDrag);
 <template>
   <div
     class="range-container"
+    :class="{ dragging: isDragging }"
     @mousedown="startDrag"
     @touchstart="startDrag"
     @wheel.prevent="onWheel"
@@ -96,40 +97,48 @@ onBeforeUnmount(stopDrag);
 
 <style scoped>
 .range-container {
-  padding: 6px 0;
+  padding: 7px 0;
   cursor: pointer;
 }
 
 .range {
   position: relative;
   width: 100%;
-  height: 6px;
+  height: 5px;
   user-select: none;
 }
 
 .range-background {
   position: absolute;
   inset: 0;
-  background: #323232;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
 }
 
 .range-fill {
   position: absolute;
   inset: 0;
-  background: #ff0000;
+  background: linear-gradient(90deg, var(--accent-primary), #ff5275);
   width: 0%;
-  border-radius: 6px;
+  border-radius: 999px;
 }
 
 .range-handle {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(0.9);
   width: 12px;
   height: 12px;
-  background: #ff0000;
+  background: #ffffff;
+  border: 2px solid var(--accent-primary);
   border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-glow);
   pointer-events: none;
+  transition: transform 0.12s ease;
+}
+
+.range-container:hover .range-handle,
+.range-container.dragging .range-handle {
+  transform: translate(-50%, -50%) scale(1.1);
 }
 </style>
