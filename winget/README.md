@@ -12,7 +12,8 @@ versioned alongside the code that produced it.
    ```powershell
    $env:YTMD_UPDATE_FEED_OWNER = "oPaozinh0"
    $env:YTMD_UPDATE_FEED_REPOSITORY = "ytmdesktop"
-   yarn make
+   $env:NODE_ENV = "production"
+   corepack pnpm make --arch x64
    ```
 
 2. Attach `out/make/squirrel.windows/x64/YTMDesktop-Adblock-<version>-Setup.exe` to a GitHub release

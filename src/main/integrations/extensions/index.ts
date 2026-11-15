@@ -1,12 +1,14 @@
-import { Session } from "electron";
+import { dialog, ipcMain } from "electron";
 import path from "path";
 import fs from "fs/promises";
 import log from "electron-log";
-import Conf from "conf";
 
-import IIntegration from "../integration";
-import MemoryStore from "../../memory-store";
-import { ExtensionLoadError, LoadedExtension, MemoryStoreSchema, StoreSchema, UserExtension } from "../../../shared/store/schema";
+import Integration from "../integration";
+import ConfigStore from "../../services/configstore";
+import MemoryStore from "../../services/memorystore";
+import AppWindowManager from "../../services/windowmanager";
+import YTMViewManager from "../../services/ytmviewmanager";
+import { ExtensionLoadError, LoadedExtension, MemoryStoreSchema, UserExtension } from "../../../shared/store/schema";
 
 type ExtensionManifest = {
   name?: string;
@@ -16,7 +18,7 @@ type ExtensionManifest = {
 };
 
 // Registered before any extension loads so their background pages find the APIs they expect
-const shimPreloadPath = path.join(__dirname, "../renderer/windows/extension-shim/shim-preload.js");
+const shimPreloadPath = path.join(__dirname, "../preload/windows/extension-shim/shim-preload.cjs");
 
 export class ExtensionValidationError extends Error {}
 
@@ -28,38 +30,85 @@ export class ExtensionValidationError extends Error {}
  * chrome.declarativeNetRequest is not, so Manifest V3 blockers like uBlock Origin Lite will load
  * without ever blocking anything. Packed .crx files are not supported either.
  */
-export default class Extensions implements IIntegration {
-  private session: Session;
-  private store: Conf<StoreSchema>;
-  private memoryStore: MemoryStore<MemoryStoreSchema>;
-  private isEnabled = false;
+export default class Extensions extends Integration {
+  public override name = "Extensions";
+  public override storeEnableProperty: Integration["storeEnableProperty"] = "adblocker.extensionsEnabled";
 
+  private extensionsActive = false;
   private loaded: LoadedExtension[] = [];
   private errors: ExtensionLoadError[] = [];
   private shimPreloadScriptId: string | null = null;
 
-  public provide(store: Conf<StoreSchema>, memoryStore: MemoryStore<MemoryStoreSchema>, session: Session): void {
-    this.store = store;
-    this.memoryStore = memoryStore;
-    this.session = session;
-  }
+  public override onSetup(): void {
+    ipcMain.handle("extensions:add", async event => {
+      const windowManager = this.getService(AppWindowManager);
+      const settingsWindow = windowManager.getWindow("Settings");
+      if (!settingsWindow || event.sender !== settingsWindow.webContents) {
+        return { cancelled: true };
+      }
 
-  public enable(): void {
-    this.loadAll().catch(error => {
-      log.error("Extensions failed to enable", error);
+      const result = await dialog.showOpenDialog(settingsWindow._getElectronWindow(), {
+        title: "Select an unpacked extension folder",
+        properties: ["openDirectory"]
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { cancelled: true };
+      }
+
+      try {
+        const extension = await this.add(result.filePaths[0]);
+        if (this.extensionsActive) {
+          this.reloadYTMView();
+        }
+        return { extension };
+      } catch (error) {
+        if (error instanceof ExtensionValidationError) {
+          return { error: error.message };
+        }
+
+        log.error("Failed to add extension", error);
+        return { error: "The extension could not be added" };
+      }
+    });
+
+    ipcMain.handle("extensions:remove", (event, extensionPath: string) => {
+      const windowManager = this.getService(AppWindowManager);
+      const settingsWindow = windowManager.getWindow("Settings");
+      if (!settingsWindow || event.sender !== settingsWindow.webContents) {
+        return;
+      }
+
+      const wasLoaded = this.loaded.some(extension => extension.path === extensionPath);
+      this.remove(extensionPath);
+      if (this.extensionsActive && wasLoaded) {
+        this.reloadYTMView();
+      }
     });
   }
 
-  public disable(): void {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
+  public override async onEnabled(): Promise<void> {
+    await this.loadAll();
 
+    if (this.loaded.length > 0) {
+      this.reloadYTMView();
+    }
+  }
+
+  public override onDisabled(): void {
+    if (!this.extensionsActive) return;
+    this.extensionsActive = false;
+
+    const configStore = this.getService(ConfigStore);
+    const ytmViewManager = this.getService(YTMViewManager);
+    const ytmSession = ytmViewManager.getSession();
+
+    const hadLoaded = this.loaded.length > 0;
     for (const extension of this.loaded) {
       this.unload(extension.id);
     }
 
     if (this.shimPreloadScriptId !== null) {
-      this.session.unregisterPreloadScript(this.shimPreloadScriptId);
+      ytmSession.unregisterPreloadScript(this.shimPreloadScriptId);
       this.shimPreloadScriptId = null;
     }
 
@@ -68,10 +117,10 @@ export default class Extensions implements IIntegration {
     this.publishState();
 
     log.info("Extensions unloaded");
-  }
 
-  public getYTMScripts(): { name: string; script: string }[] {
-    return [];
+    if (hadLoaded && !configStore.get("adblocker.extensionsEnabled")) {
+      this.reloadYTMView();
+    }
   }
 
   /**
@@ -79,19 +128,21 @@ export default class Extensions implements IIntegration {
    * through the memory store instead of taking the rest of them down with it.
    */
   public async loadAll(): Promise<void> {
-    if (!this.session) return;
+    const configStore = this.getService(ConfigStore);
+    const ytmViewManager = this.getService(YTMViewManager);
+    const ytmSession = ytmViewManager.getSession();
 
-    this.isEnabled = true;
+    this.extensionsActive = true;
     this.errors = [];
 
     if (this.shimPreloadScriptId === null) {
-      this.shimPreloadScriptId = this.session.registerPreloadScript({
+      this.shimPreloadScriptId = ytmSession.registerPreloadScript({
         type: "frame",
         filePath: shimPreloadPath
       });
     }
 
-    for (const extension of this.store.get("adblocker").extensions ?? []) {
+    for (const extension of configStore.get("adblocker").extensions ?? []) {
       if (this.loaded.some(loaded => loaded.path === extension.path)) continue;
       await this.load(extension.path);
     }
@@ -116,14 +167,15 @@ export default class Extensions implements IIntegration {
   public async add(extensionPath: string): Promise<UserExtension> {
     const extension = await this.inspect(extensionPath);
 
-    const extensions = this.store.get("adblocker").extensions ?? [];
+    const configStore = this.getService(ConfigStore);
+    const extensions = configStore.get("adblocker").extensions ?? [];
     if (extensions.some(existing => existing.path === extension.path)) {
       throw new ExtensionValidationError("This extension has already been added");
     }
 
-    this.store.set("adblocker.extensions", [...extensions, extension]);
+    configStore.set("adblocker.extensions", [...extensions, extension]);
 
-    if (this.isEnabled) {
+    if (this.extensionsActive) {
       await this.load(extension.path);
       this.publishState();
     }
@@ -132,8 +184,9 @@ export default class Extensions implements IIntegration {
   }
 
   public remove(extensionPath: string): void {
-    const extensions = this.store.get("adblocker").extensions ?? [];
-    this.store.set(
+    const configStore = this.getService(ConfigStore);
+    const extensions = configStore.get("adblocker").extensions ?? [];
+    configStore.set(
       "adblocker.extensions",
       extensions.filter(existing => existing.path !== extensionPath)
     );
@@ -154,11 +207,20 @@ export default class Extensions implements IIntegration {
 
   // --------------------------------------------------
 
+  private reloadYTMView(): void {
+    const ytmView = this.getService(YTMViewManager).getView();
+    if (ytmView?.webContents && !ytmView.webContents.isDestroyed()) {
+      ytmView.webContents.reload();
+    }
+  }
+
   private async load(extensionPath: string): Promise<void> {
+    const ytmSession = this.getService(YTMViewManager).getSession();
+
     try {
       await this.readManifest(extensionPath);
 
-      const extension = await this.session.extensions.loadExtension(extensionPath, { allowFileAccess: false });
+      const extension = await ytmSession.extensions.loadExtension(extensionPath, { allowFileAccess: false });
       this.loaded.push({
         id: extension.id,
         name: extension.name,
@@ -175,8 +237,10 @@ export default class Extensions implements IIntegration {
   }
 
   private unload(extensionId: string) {
+    const ytmSession = this.getService(YTMViewManager).getSession();
+
     try {
-      this.session.extensions.removeExtension(extensionId);
+      ytmSession.extensions.removeExtension(extensionId);
     } catch (error) {
       log.error(`Extension ${extensionId} could not be unloaded`, error);
     }
@@ -213,7 +277,7 @@ export default class Extensions implements IIntegration {
    * load time but we can't before the extension is loaded, so fall back to the folder name.
    */
   private resolveName(manifest: ExtensionManifest, extensionPath: string): string {
-    if (manifest.name.startsWith("__MSG_")) {
+    if (!manifest.name || manifest.name.startsWith("__MSG_")) {
       return path.basename(extensionPath);
     }
 
@@ -221,7 +285,8 @@ export default class Extensions implements IIntegration {
   }
 
   private publishState() {
-    this.memoryStore.set("extensionsLoaded", this.loaded);
-    this.memoryStore.set("extensionsLoadErrors", this.errors);
+    const memoryStore = this.getService(MemoryStore<MemoryStoreSchema>);
+    memoryStore.set("extensionsLoaded", this.loaded);
+    memoryStore.set("extensionsLoadErrors", this.errors);
   }
 }

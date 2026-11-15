@@ -2,14 +2,15 @@ import { app, ipcMain, Session } from "electron";
 import path from "path";
 import fs from "fs/promises";
 import log from "electron-log";
-import Conf from "conf";
 import { ElectronBlocker } from "@ghostery/adblocker-electron";
 import type { IBackgroundCallback } from "@ghostery/adblocker-electron-preload";
 import { parse } from "tldts-experimental";
 
-import IIntegration from "../integration";
-import MemoryStore from "../../memory-store";
-import { AdblockerFilterSet, MemoryStoreSchema, StoreSchema } from "../../../shared/store/schema";
+import Integration from "../integration";
+import ConfigStore from "../../services/configstore";
+import MemoryStore from "../../services/memorystore";
+import YTMViewManager from "../../services/ytmviewmanager";
+import { AdblockerFilterSet, MemoryStoreSchema } from "../../../shared/store/schema";
 
 // These are the ipc channels the adblocker preload script talks to. They're defined by
 // @ghostery/adblocker-electron and must match exactly.
@@ -21,64 +22,44 @@ const GET_SCRIPTLETS_CHANNEL = "ytmd:adblocker:getScriptlets";
 
 // We register the preload ourselves rather than letting enableBlockingInSession do it. The path the
 // library resolves points into node_modules which does not exist in a packaged build.
-const preloadPath = path.join(__dirname, "../renderer/windows/ytmview-adblocker/adblocker-preload.js");
+const preloadPath = path.join(__dirname, "../preload/windows/ytmview-adblocker/adblocker-preload.cjs");
 
 const cacheMaxAge = 3 * 24 * 60 * 60 * 1000;
 
-export default class Adblocker implements IIntegration {
-  private session: Session;
-  private store: Conf<StoreSchema>;
-  private memoryStore: MemoryStore<MemoryStoreSchema>;
+export default class Adblocker extends Integration {
+  public override name = "Adblocker";
+  public override storeEnableProperty: Integration["storeEnableProperty"] = "adblocker.blockerEnabled";
+  public override dependentStoreProperties: Integration["dependentStoreProperties"] = [
+    "adblocker.filterSet",
+    "adblocker.cosmeticFilteringEnabled",
+    "adblocker.scriptletsEnabled"
+  ];
 
   private blocker: ElectronBlocker | null = null;
   private blockerFilterSet: AdblockerFilterSet | null = null;
   private blockerCosmeticFiltering = false;
   private scriptletsEnabled = false;
   private preloadScriptId: string | null = null;
-  private isEnabled = false;
+  private attached = false;
   private blockedCount = 0;
 
-  public provide(store: Conf<StoreSchema>, memoryStore: MemoryStore<MemoryStoreSchema>, session: Session): void {
-    this.store = store;
-    this.memoryStore = memoryStore;
-    this.session = session;
+  public override onSetup(): void {}
+
+  public override async onEnabled(): Promise<void> {
+    await this.initialize();
   }
 
-  public enable(): void {
-    // The engine has to be built before anything can be blocked. Callers that care about the engine
-    // being ready before the view navigates should await initialize() first.
-    this.initialize().catch(error => {
-      log.error("Adblocker failed to enable", error);
-    });
-  }
+  public override onDisabled(): void {
+    const configStore = this.getService(ConfigStore);
+    const memoryStore = this.getService(MemoryStore<MemoryStoreSchema>);
+    const ytmViewManager = this.getService(YTMViewManager);
 
-  public disable(): void {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
+    this.detach(ytmViewManager.getSession(), memoryStore);
 
-    if (this.session) {
-      this.session.webRequest.onBeforeRequest(null);
-      this.session.webRequest.onHeadersReceived(null);
-
-      if (this.preloadScriptId !== null) {
-        this.session.unregisterPreloadScript(this.preloadScriptId);
-        this.preloadScriptId = null;
-      }
+    const ytmView = ytmViewManager.getView();
+    if (ytmView?.webContents && !ytmView.webContents.isDestroyed() && !configStore.get("adblocker.blockerEnabled")) {
+      ytmView.webContents.reload();
     }
-
-    ipcMain.removeHandler(INJECT_COSMETIC_FILTERS_CHANNEL);
-    ipcMain.removeHandler(IS_MUTATION_OBSERVER_ENABLED_CHANNEL);
-    ipcMain.removeListener(GET_SCRIPTLETS_CHANNEL, this.onGetScriptlets);
-
-    this.blockedCount = 0;
-    this.memoryStore.set("adblockerBlockedCount", 0);
-    this.memoryStore.set("adblockerReady", false);
-
-    log.info("Adblocker blocking disabled");
-  }
-
-  public getYTMScripts(): { name: string; script: string }[] {
-    return [];
   }
 
   /**
@@ -86,13 +67,15 @@ export default class Adblocker implements IIntegration {
    * call multiple times, it will rebuild the engine if the configured filter set changed.
    */
   public async initialize(): Promise<void> {
-    if (!this.session) return;
+    const configStore = this.getService(ConfigStore);
+    const memoryStore = this.getService(MemoryStore<MemoryStoreSchema>);
+    const ytmViewManager = this.getService(YTMViewManager);
 
-    const settings = this.getSettings();
+    const settings = configStore.get("adblocker");
     const filterSet = settings.filterSet;
 
     if (
-      this.isEnabled &&
+      this.attached &&
       this.blockerFilterSet === filterSet &&
       this.blockerCosmeticFiltering === settings.cosmeticFilteringEnabled &&
       this.scriptletsEnabled === settings.scriptletsEnabled
@@ -101,28 +84,56 @@ export default class Adblocker implements IIntegration {
     }
 
     // Rebuilding means tearing down whatever is currently attached
-    if (this.isEnabled) this.disable();
+    if (this.attached) {
+      this.detach(ytmViewManager.getSession(), memoryStore);
+    }
 
-    this.memoryStore.set("adblockerFailed", false);
+    memoryStore.set("adblockerFailed", false);
 
-    try {
-      this.blocker = await this.buildEngine(filterSet);
-      this.blockerFilterSet = filterSet;
-    } catch (error) {
-      log.error("Adblocker engine could not be built", error);
-      this.memoryStore.set("adblockerFailed", true);
-      this.memoryStore.set("adblockerReady", false);
-      return;
+    if (!this.blocker || this.blockerFilterSet !== filterSet) {
+      try {
+        this.blocker = await this.buildEngine(filterSet);
+        this.blockerFilterSet = filterSet;
+      } catch (error) {
+        log.error("Adblocker engine could not be built", error);
+        memoryStore.set("adblockerFailed", true);
+        memoryStore.set("adblockerReady", false);
+        return;
+      }
     }
 
     this.scriptletsEnabled = settings.scriptletsEnabled;
-    this.attach(settings.cosmeticFilteringEnabled);
+    this.attach(ytmViewManager.getSession(), memoryStore, settings.cosmeticFilteringEnabled);
+
+    const ytmView = ytmViewManager.getView();
+    if (ytmView?.webContents && !ytmView.webContents.isDestroyed()) {
+      ytmView.webContents.reload();
+    }
   }
 
   // --------------------------------------------------
 
-  private getSettings(): StoreSchema["adblocker"] {
-    return this.store.get("adblocker");
+  private detach(ytmSession: Session, memoryStore: MemoryStore<MemoryStoreSchema>): void {
+    if (!this.attached) return;
+    this.attached = false;
+
+    ytmSession.webRequest.onBeforeRequest(null);
+    ytmSession.webRequest.onHeadersReceived(null);
+
+    if (this.preloadScriptId !== null) {
+      ytmSession.unregisterPreloadScript(this.preloadScriptId);
+      this.preloadScriptId = null;
+    }
+
+    ipcMain.removeHandler(INJECT_COSMETIC_FILTERS_CHANNEL);
+    ipcMain.removeHandler(IS_MUTATION_OBSERVER_ENABLED_CHANNEL);
+    ipcMain.removeListener(GET_SCRIPTLETS_CHANNEL, this.onGetScriptlets);
+
+    this.blockedCount = 0;
+    memoryStore.set("adblockerBlockedCount", 0);
+    memoryStore.set("adblockerReady", false);
+
+    log.info("Adblocker blocking disabled");
   }
 
   /**
@@ -216,7 +227,7 @@ export default class Adblocker implements IIntegration {
     }[filterSet];
 
     try {
-      const blocker = await fromPrebuilt.call(ElectronBlocker, fetch, caching);
+      const blocker = (await fromPrebuilt.call(ElectronBlocker, fetch, caching)) as ElectronBlocker;
       log.info(`Adblocker engine loaded (filter set ${filterSet})`);
       return blocker;
     } catch (error) {
@@ -226,25 +237,26 @@ export default class Adblocker implements IIntegration {
       const cached = await fs.readFile(cachePath).catch((): null => null);
       if (!cached) throw error;
 
-      const blocker = ElectronBlocker.deserialize(cached);
+      const blocker = ElectronBlocker.deserialize(cached) as ElectronBlocker;
       log.info("Adblocker engine loaded from cache");
       return blocker;
     }
   }
 
-  private attach(cosmeticFilteringEnabled: boolean) {
+  private attach(ytmSession: Session, memoryStore: MemoryStore<MemoryStoreSchema>, cosmeticFilteringEnabled: boolean) {
     const blocker = this.blocker;
+    if (!blocker) return;
 
-    this.session.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
+    ytmSession.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
       blocker.onBeforeRequest(details, response => {
         if (response.cancel || response.redirectURL) {
           this.blockedCount++;
-          this.memoryStore.set("adblockerBlockedCount", this.blockedCount);
+          memoryStore.set("adblockerBlockedCount", this.blockedCount);
         }
         callback(response);
       });
     });
-    this.session.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
+    ytmSession.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
       blocker.onHeadersReceived(details, callback);
     });
 
@@ -256,13 +268,13 @@ export default class Adblocker implements IIntegration {
     ipcMain.handle(IS_MUTATION_OBSERVER_ENABLED_CHANNEL, blocker.onIsMutationObserverEnabled);
     ipcMain.on(GET_SCRIPTLETS_CHANNEL, this.onGetScriptlets);
 
-    this.preloadScriptId = this.session.registerPreloadScript({
+    this.preloadScriptId = ytmSession.registerPreloadScript({
       type: "frame",
       filePath: preloadPath
     });
 
-    this.isEnabled = true;
-    this.memoryStore.set("adblockerReady", true);
+    this.attached = true;
+    memoryStore.set("adblockerReady", true);
     log.info(`Adblocker blocking enabled (cosmetic filtering ${cosmeticFilteringEnabled ? "on" : "off"}, scriptlets ${this.scriptletsEnabled ? "on" : "off"})`);
   }
 }
