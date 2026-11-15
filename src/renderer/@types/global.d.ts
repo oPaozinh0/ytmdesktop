@@ -73,6 +73,7 @@ declare global {
 
       // App specific
       getAppVersion(): Promise<string>;
+      openChangelog?(): void;
       checkForUpdates(): void;
       handleCheckingForUpdate(callback: () => void);
       handleUpdateAvailable(callback: () => void);

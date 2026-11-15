@@ -17,7 +17,7 @@ AppsAndFeaturesEntries:
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/oPaozinh0/ytmdesktop/releases/download/v3.0.0/YTMDesktop-Adblock-3.0.0-Setup.exe
-  InstallerSha256: DC340C73B737747364AFBB4F6C220C26A88091AE2421DE09547500A5E5817E60
+  InstallerSha256: 8C0729AC6385AE68944D96C67A71BA6E8A225EAC148144ED80B13082D615078F
 ManifestType: installer
 ManifestVersion: 1.12.0
 ReleaseDate: 2026-11-15

@@ -340,6 +340,63 @@ app.on("ready", async () => {
     return app.getVersion();
   });
 
+  ipcMain.handle("changelog:getReleaseMetadata", async () => {
+    const currentVersion = app.getVersion();
+    const fallbackNotes = [
+      `# YTM Shield v${currentVersion}`,
+      "",
+      "- Native **YTM Shield Glass** theme & dynamic **Ambient Glow** inside YouTube Music",
+      "- **10-Band Web Audio Equalizer** (6 presets + Custom) & **Loudness Normalization**",
+      "- **SponsorBlock** auto-skip with SHA-256 hash-prefix privacy lookup",
+      "- **Global Command Palette** (`Ctrl+K`) for quick search, queue navigation & actions",
+      "- Upgraded **Miniplayer** with **Compact Horizontal Bar** mode, **Queue Drawer**, Track Info & Sleep Timer",
+      "- **Ad Shield** persistent lifetime stats, live blocked log, manual filter refresh & custom ABP/uBO rules",
+      "- Dynamic **System Tray** controls, global **Accent Color** picker & live-reload **CSS Editor**"
+    ].join("\n");
+
+    try {
+      const ghRes = await fetch(`https://api.github.com/repos/oPaozinh0/ytmdesktop/releases/tags/v${currentVersion}`, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": `YTMDesktop-Adblock/${currentVersion}`
+        }
+      });
+      if (ghRes.ok) {
+        const ghJson = (await ghRes.json()) as { name?: string; body?: string };
+        if (ghJson.body?.trim()) {
+          return {
+            name: ghJson.name || `v${currentVersion}`,
+            notes: ghJson.body
+          };
+        }
+      }
+    } catch (err) {
+      log.warn("Failed to retrieve GitHub release changelog", err);
+    }
+
+    try {
+      const feedUrl = autoUpdater.getFeedUrlNoPlatform();
+      const res = await fetch(`${feedUrl}/win32/0.0.0`);
+      if (res.ok && res.status !== 204) {
+        const json = (await res.json()) as { name?: string; notes?: string };
+        if (json.notes?.trim()) {
+          return json;
+        }
+      }
+    } catch (err) {
+      log.warn("Failed to retrieve update server changelog", err);
+    }
+
+    return {
+      name: `YTM Shield v${currentVersion}`,
+      notes: fallbackNotes
+    };
+  });
+
+  ipcMain.on("app:openChangelog", () => {
+    openOrFocusChangelog();
+  });
+
   ipcMain.on("app:relaunch", () => {
     app.relaunch();
     app.quit();
@@ -508,6 +565,67 @@ app.on("ready", async () => {
       return {
         action: "deny"
       };
+    });
+  }
+
+  function openOrFocusChangelog() {
+    if (windowManager.hasWindow("Changelog")) {
+      windowManager.getWindow("Changelog").showAndFocus();
+      return;
+    }
+
+    const parentWindow = windowManager.hasWindow("Settings")
+      ? windowManager.getWindow("Settings")._getElectronWindow()
+      : mainWindow._getElectronWindow();
+    const parentBounds = parentWindow.getBounds();
+    const changelogWindow = windowManager.createWindow("Browser", {
+      name: "Changelog",
+      autoRecreate: false,
+      waitForViews: true,
+      url: app.isPackaged ? "ytmd-app://changelog" : ALL_WINDOWS_VITE_DEV_SERVER_URL + "/windows/changelog/index.html",
+      electronOptions: {
+        width: 800,
+        height: 600,
+        x: Math.round(parentBounds.x + (parentBounds.width / 2 - 400)),
+        y: Math.round(parentBounds.y + (parentBounds.height / 2 - 300)),
+        minimizable: false,
+        maximizable: false,
+        frame: false,
+        show: false,
+        icon: getIconPath("ytmd.png"),
+        parent: parentWindow,
+        modal: process.platform !== "darwin",
+        titleBarStyle: "hidden",
+        titleBarOverlay: {
+          color: "#0b0c10",
+          symbolColor: "#f4f4f6",
+          height: 36
+        },
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          preload: path.join(__dirname, `../preload/windows/changelog/preload.cjs`),
+          devTools: !app.isPackaged ? true : configStore.get("developer.enableDevTools")
+        }
+      }
+    });
+    changelogWindow.setWindowOpenHandler(details => {
+      shell.openExternal(details.url);
+
+      return {
+        action: "deny"
+      };
+    });
+    changelogWindow.webContents?.on("will-navigate", event => {
+      event.preventDefault();
+      shell.openExternal(event.url);
+    });
+    changelogWindow.webContents?.on("will-redirect", event => {
+      event.preventDefault();
+      shell.openExternal(event.url);
+    });
+    changelogWindow.on("electronwindow-close", () => {
+      configStore.set("metadata.appVersion", app.getVersion());
     });
   }
 
@@ -981,78 +1099,7 @@ app.on("ready", async () => {
 
   // Show a changelog popup window if one should be shown
   if (configStore.get("metadata.appVersion") !== app.getVersion()) {
-    const mainWindowBounds = mainWindow._getElectronWindow().getBounds();
-    const changelogWindow = windowManager.createWindow("Browser", {
-      name: "Changelog",
-      autoRecreate: false,
-      waitForViews: true,
-      url: app.isPackaged ? "ytmd-app://changelog" : ALL_WINDOWS_VITE_DEV_SERVER_URL + "/windows/changelog/index.html",
-      electronOptions: {
-        width: 800,
-        height: 600,
-        x: Math.round(mainWindowBounds.x + (mainWindowBounds.width / 2 - 400)),
-        y: Math.round(mainWindowBounds.y + (mainWindowBounds.height / 2 - 300)),
-        minimizable: false,
-        maximizable: false,
-        frame: false,
-        show: false,
-        icon: getIconPath("ytmd.png"),
-        parent: mainWindow._getElectronWindow(),
-        modal: process.platform !== "darwin",
-        titleBarStyle: "hidden",
-        titleBarOverlay: {
-          color: "#0b0c10",
-          symbolColor: "#f4f4f6",
-          height: 36
-        },
-        webPreferences: {
-          sandbox: true,
-          contextIsolation: true,
-          preload: path.join(__dirname, `../preload/windows/changelog/preload.cjs`),
-          devTools: !app.isPackaged ? true : configStore.get("developer.enableDevTools")
-        }
-      }
-    });
-    changelogWindow.ipcHandle("changelog:getReleaseMetadata", async () => {
-      try {
-        const feedUrl = autoUpdater.getFeedUrlNoPlatform();
-        // Not all platforms are supported so we just use win32 to grab the notes
-        const res = await fetch(`${feedUrl}/win32/${configStore.get("metadata.appVersion")}`);
-        if (res.ok && res.status != 204) {
-          const json = await res.json();
-          return json
-        }
-
-        return {
-          name: app.getVersion(),
-          notes: "# Failed to retrieve changelog"
-        }
-      } catch(err) {
-        log.warn("Failed to retrieve changelog", err);
-        return {
-          name: app.getVersion(),
-          notes: "# Failed to retrieve changelog"
-        }
-      }
-    });
-    changelogWindow.setWindowOpenHandler(details => {
-      shell.openExternal(details.url);
-
-      return {
-        action: "deny"
-      };
-    });
-    changelogWindow.webContents?.on("will-navigate", event => {
-      event.preventDefault();
-      shell.openExternal(event.url);
-    });
-    changelogWindow.webContents?.on("will-redirect", event => {
-      event.preventDefault();
-      shell.openExternal(event.url);
-    });
-    changelogWindow.on("electronwindow-close", () => {
-      configStore.set("metadata.appVersion", app.getVersion());
-    });
+    openOrFocusChangelog();
   }
 });
 

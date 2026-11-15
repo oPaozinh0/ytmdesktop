@@ -241,7 +241,7 @@ export default class ConfigStore extends Service {
           if (!store.has("adblocker.sponsorBlockCategories")) {
             store.set("adblocker.sponsorBlockCategories", ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"]);
           }
-          store.set("metadata.appVersion", "3.0.0");
+          store.set("metadata.appVersion", store.get("metadata.appVersion") ?? "2.2.0");
         }
       }
     });

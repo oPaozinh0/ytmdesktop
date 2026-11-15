@@ -34,6 +34,7 @@ const checkingForUpdate = ref(false);
 const updateAvailable = ref(await window.ytmd.isAppUpdateAvailable());
 const updateNotAvailable = ref(false);
 const updateDownloaded = ref(await window.ytmd.isAppUpdateDownloaded());
+const updateErrored = ref<boolean>((await memoryStore.get("autoUpdaterErrored")) ?? false);
 
 const safeStorageAvailable = ref<boolean>(await memoryStore.get("safeStorageAvailable"));
 
@@ -227,6 +228,7 @@ memoryStore.onStateChanged(newState => {
   updateAvailable.value = newState.autoUpdaterAvailable;
   updateNotAvailable.value = newState.autoUpdaterNotAvailable;
   updateDownloaded.value = newState.autoUpdaterDownloaded;
+  updateErrored.value = newState.autoUpdaterErrored ?? false;
 
   lastFMAuthenticationStep.value = newState.lastFMAuthenticationStep;
 
@@ -609,8 +611,14 @@ function restartApplicationForUpdate() {
 }
 
 function checkForUpdates() {
+  updateNotAvailable.value = false;
+  updateErrored.value = false;
   window.ytmd.checkForUpdates();
   checkingForUpdate.value = true;
+}
+
+function openChangelog() {
+  window.ytmd.openChangelog?.();
 }
 
 async function logoutLastFM() {
@@ -1754,6 +1762,12 @@ function stepLastFMAuth() {
                 >
                   You are running the latest version
                 </p>
+                <p
+                  v-if="updateErrored && !checkingForUpdate && !updateAvailable && !updateDownloaded"
+                  class="update-status muted"
+                >
+                  Failed to check for updates. Try again in a moment.
+                </p>
               </template>
               <template v-else>
                 <p class="update-status muted">
@@ -1794,6 +1808,14 @@ function stepLastFMAuth() {
                 <span class="material-symbols-outlined">code</span>
                 GitHub Repository
               </a>
+              <button
+                type="button"
+                class="about-link-btn"
+                @click="openChangelog"
+              >
+                <span class="material-symbols-outlined">new_releases</span>
+                What's New (Changelog)
+              </button>
               <a
                 class="about-link-btn"
                 href="https://github.com/oPaozinh0/ytmdesktop/issues"
@@ -2663,6 +2685,8 @@ function stepLastFMAuth() {
 
 .about-links {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 10px;
 }
@@ -2676,9 +2700,11 @@ function stepLastFMAuth() {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
+  font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 

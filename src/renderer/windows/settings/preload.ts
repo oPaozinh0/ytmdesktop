@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("ytmd", {
   setSleepTimer: (option: number | "end_of_track") => ipcRenderer.send("sleepTimer:set", option),
   restartApplication: () => ipcRenderer.send("app:relaunch"),
   restartApplicationForUpdate: () => ipcRenderer.send("app:restartApplicationForUpdate"),
+  openChangelog: () => ipcRenderer.send("app:openChangelog"),
   getAppVersion: async (): Promise<string> => await ipcRenderer.invoke("app:getVersion"),
   checkForUpdates: () => ipcRenderer.send("app:checkForUpdates"),
   handleCheckingForUpdate: (callback: () => void) => ipcRenderer.on("autoUpdater:checkingForUpdate", () => callback()),
